@@ -4,8 +4,6 @@ GPU_OC_CONFIG=/etc/cyan-skillfish-governor-smu/config.toml
 GPU_OC_STATE_DIR=/etc/bc250-master-toolkit
 GPU_OC_BACKUP="$GPU_OC_STATE_DIR/cyan-skillfish-governor-smu.config.toml.base"
 GPU_OC_STATE="$GPU_OC_STATE_DIR/gpu-profile"
-# Keep this module self-contained: the main script normally defines CYAN_SERVICE,
-# but direct/module execution must never fail with an unset-variable error.
 CYAN_SERVICE="${CYAN_SERVICE:-cyan-skillfish-governor-smu.service}"
 
 bc250_gpu_oc_profile_value() {
@@ -22,21 +20,32 @@ bc250_gpu_oc_profile_exists() {
 }
 
 bc250_gpu_oc_range() {
+  local file="$GPU_OC_CONFIG"
+  local content
+  if [ -r "$file" ]; then
+    content=$(cat "$file")
+  elif [ -f "$file" ] && command -v sudo >/dev/null 2>&1 && content=$(sudo -n cat "$file" 2>/dev/null); then
+    :
+  else
+    return 1
+  fi
   awk '
     /^\[frequency-range\]/{inrange=1;next}
     /^\[/{inrange=0}
     inrange && /^[[:space:]]*min[[:space:]]*=/ {min=$0}
-    inrange && /^[[:space:]]*max[[:space:]]=/ {max=$0}
+    inrange && /^[[:space:]]*max[[:space:]]*=/ {max=$0}
     END {gsub(/.*=[[:space:]]*/,"",min);gsub(/.*=[[:space:]]*/,"",max);print min "|" max}
-  ' "$GPU_OC_CONFIG" 2>/dev/null
+  ' <<< "$content"
 }
 
 bc250_gpu_oc_active_profile() { [ -r "$GPU_OC_STATE" ] && cat "$GPU_OC_STATE" || echo none; }
 
 bc250_gpu_oc_status() {
   local range min max profile
-  [ -r "$GPU_OC_CONFIG" ] || { warn 'Cyan-Skillfish configuration not found.'; return 1; }
-  range=$(bc250_gpu_oc_range); min=${range%%|*}; max=${range#*|}; profile=$(bc250_gpu_oc_active_profile)
+  [ -f "$GPU_OC_CONFIG" ] || { warn 'Cyan-Skillfish configuration not found.'; return 1; }
+  range=$(bc250_gpu_oc_range 2>/dev/null || true)
+  min=${range%%|*}; max=${range#*|}; profile=$(bc250_gpu_oc_active_profile)
+  [ -n "$min" ] && [ -n "$max" ] || { warn 'Cyan-Skillfish frequency range could not be read.'; return 1; }
   printf 'GPU OC/UV control\n  Active profile        : %s\n  Governor range        : %s–%s MHz\n  Config                : %s\n' "$profile" "$min" "$max" "$GPU_OC_CONFIG"
   echo
   info 'The range is the governor operating envelope. The active profile or manual target defines the top frequency and voltage.'
@@ -78,7 +87,6 @@ else:
     if not re.search(r'^min\s*=',b,re.M): b+=f'min = {minf}\n'
     if not re.search(r'^max\s*=',b,re.M): b+=f'max = {maxf}\n'
     s=s[:m.start()]+b+s[m.end():]
-# Replace any existing safe point at the selected maximum with the requested voltage.
 s=re.sub(r'\[\[safe-points\]\]\s*\nfrequency\s*=\s*'+re.escape(maxf)+r'\s*\nvoltage\s*=\s*\d+\s*\n?','',s,flags=re.M)
 s=s.rstrip()+f'\n\n[[safe-points]]\nfrequency = {maxf}\nvoltage = {volt}\n'
 open(dst,'w',encoding='utf-8').write(s)
@@ -90,7 +98,7 @@ bc250_gpu_oc_apply_values() {
   need_root
   local name="$1" freq="$2" volt="$3" requested_min="${4:-}" range min_freq
   [ -f "$GPU_OC_CONFIG" ] || die "Cyan-Skillfish configuration not found: $GPU_OC_CONFIG"
-  range=$(bc250_gpu_oc_range); min_freq=${range%%|*}; [ -n "$min_freq" ] || min_freq=1000
+  range=$(bc250_gpu_oc_range 2>/dev/null || true); min_freq=${range%%|*}; [ -n "$min_freq" ] || min_freq=1000
   [ -n "$requested_min" ] && min_freq="$requested_min"
   bc250_gpu_oc_validate "$freq" "$volt" "$min_freq"
   bc250_gpu_oc_write "$freq" "$volt" "$min_freq"
@@ -121,11 +129,7 @@ bc250_gpu_oc_create() {
   local name="${1:-}" freq="${2:-}" volt="${3:-}" min_freq="${4:-}" file
   [ -n "$name" ] && [ -n "$freq" ] && [ -n "$volt" ] || die 'Use: gpu oc create <name> <maxMHz> <mV> [minMHz]'
   [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || die 'Profile name may contain only letters, numbers, dot, underscore and hyphen.'
-  if [ -n "$min_freq" ]; then
-    bc250_gpu_oc_validate "$freq" "$volt" "$min_freq"
-  else
-    bc250_gpu_oc_validate "$freq" "$volt" 300
-  fi
+  if [ -n "$min_freq" ]; then bc250_gpu_oc_validate "$freq" "$volt" "$min_freq"; else bc250_gpu_oc_validate "$freq" "$volt" 300; fi
   file="$ROOT/profiles/gpu-personal.toml"
   if [ ! -f "$file" ]; then printf '# User-created BC-250 GPU profiles\n' > "$file"; fi
   grep -q "^name = \"$name\"$" "$file" && die "Personal profile already exists: $name"
