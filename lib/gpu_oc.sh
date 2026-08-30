@@ -9,11 +9,9 @@ CYAN_SERVICE="${CYAN_SERVICE:-cyan-skillfish-governor-smu.service}"
 bc250_gpu_oc_read_config() {
   if [ -r "$GPU_OC_CONFIG" ]; then
     cat "$GPU_OC_CONFIG"
-  elif command -v sudo >/dev/null 2>&1 && sudo -n cat "$GPU_OC_CONFIG" 2>/dev/null; then
     return 0
-  else
-    return 1
   fi
+  return 1
 }
 
 bc250_gpu_oc_range() {
@@ -81,8 +79,6 @@ block=re.sub(r'^max\s*=.*$',f'max = {mx}',block,flags=re.M)
 if not re.search(r'^min\s*=',block,re.M): block+=f'min = {mn}\n'
 if not re.search(r'^max\s*=',block,re.M): block+=f'max = {mx}\n'
 s=s[:sec.start()]+block+s[sec.end():] if sec else s.rstrip()+'\n\n'+block
-s=re.sub(r'\[\[safe-points\]\]\s*\nfrequency\s*=\s*'+re.escape(mx)+r'\s*\nvoltage\s*=\s*\d+\s*\n?','',s,flags=re.M)
-s=s.rstrip()+f'\n\n[[safe-points]]\nfrequency = {mx}\nvoltage = {v}\n'
 open(dst,'w',encoding='utf-8').write(s)
 PY
   mv "$tmp" "$GPU_OC_CONFIG" || die 'Could not update governor configuration.'
@@ -97,6 +93,7 @@ bc250_gpu_oc_apply_values() {
   bc250_gpu_oc_validate "$f" "$v" "$m"
   bc250_gpu_oc_write "$f" "$v" "$m"
   printf '%s\n' "$name" > "$GPU_OC_STATE"
+  chmod 0644 "$GPU_OC_CONFIG" "$GPU_OC_STATE" 2>/dev/null || true
   systemctl restart "$CYAN_SERVICE" 2>/dev/null || die 'Cyan-Skillfish governor failed to restart.'
   systemctl is-active --quiet "$CYAN_SERVICE" || die 'Cyan-Skillfish governor is not active after profile application.'
   ok "GPU OC/UV applied: $name — ${f} MHz @ ${v} mV"
