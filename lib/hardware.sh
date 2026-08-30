@@ -9,9 +9,21 @@ bc250_gpu_card() {
   return 1
 }
 bc250_hwmon() {
-  local card="$1" h
-  for h in "$card"/device/hwmon/hwmon*; do [ -d "$h" ] && { echo "$h"; return; }; done
+  local card="$1" h base
+  case "$card" in
+    /sys/class/drm/*) base="$card";;
+    card*) base="/sys/class/drm/$card";;
+    *) return 1;;
+  esac
+  for h in "$base"/device/hwmon/hwmon*; do [ -d "$h" ] && { echo "$h"; return; }; done
   return 1
+}
+bc250_card_path() {
+  case "$1" in
+    /sys/class/drm/*) printf '%s\n' "$1";;
+    card*) printf '/sys/class/drm/%s\n' "$1";;
+    *) return 1;;
+  esac
 }
 bc250_gpu_temp() { local h="$1" f; for f in "$h"/temp1_input "$h"/temp2_input; do [ -r "$f" ] && { awk '{printf "%.1f",$1/1000}' "$f"; return; }; done; echo N/A; }
 bc250_cpu_temp() {
@@ -24,12 +36,13 @@ bc250_cpu_temp() {
 }
 bc250_gpu_mclk() { local h="$1" f; for f in "$h"/freq2_input "$h"/freq3_input; do [ -r "$f" ] && { awk '{printf "%d",$1/1000000}' "$f"; return; }; done; echo N/A; }
 bc250_gpu_sclk() { local h="$1" f="$1/freq1_input"; [ -r "$f" ] && { awk '{printf "%d",$1/1000000}' "$f"; return; }; echo N/A; }
-bc250_gpu_busy() { local card="$1"; [ -r "$card/device/gpu_busy_percent" ] && cat "$card/device/gpu_busy_percent" || echo N/A; }
+bc250_gpu_busy() { local card="$1" path; path=$(bc250_card_path "$card") || { echo N/A; return; }; [ -r "$path/device/gpu_busy_percent" ] && cat "$path/device/gpu_busy_percent" || echo N/A; }
 bc250_gpu_vram() {
-  local card="$1" used total
-  if [ -r "$card/device/mem_info_vram_used" ] && [ -r "$card/device/mem_info_vram_total" ]; then
-    used=$(awk '{printf "%d",$1/1048576}' "$card/device/mem_info_vram_used")
-    total=$(awk '{printf "%d",$1/1048576}' "$card/device/mem_info_vram_total")
+  local card="$1" path used total
+  path=$(bc250_card_path "$card") || { echo "N/A N/A"; return; }
+  if [ -r "$path/device/mem_info_vram_used" ] && [ -r "$path/device/mem_info_vram_total" ]; then
+    used=$(awk '{printf "%d",$1/1048576}' "$path/device/mem_info_vram_used")
+    total=$(awk '{printf "%d",$1/1048576}' "$path/device/mem_info_vram_total")
     echo "$used $total"
   else echo "N/A N/A"; fi
 }
@@ -37,4 +50,4 @@ bc250_bios() { [ -r /sys/class/dmi/id/bios_version ] && cat /sys/class/dmi/id/bi
 bc250_kernel_ok() { uname -r | grep -qi bc250; }
 bc250_bios_ok() { [ "$(bc250_bios)" = P3.00 ]; }
 bc250_governor_ok() { systemctl is-active --quiet cyan-skillfish-governor-smu.service; }
-bc250_telemetry_ok() { local c; c=$(bc250_gpu_card) || return 1; [ -r "$c/device/gpu_busy_percent" ] && bc250_hwmon "$c" >/dev/null 2>&1; }
+bc250_telemetry_ok() { local c p; c=$(bc250_gpu_card) || return 1; p=$(bc250_card_path "$c") || return 1; [ -r "$p/device/gpu_busy_percent" ] && bc250_hwmon "$c" >/dev/null 2>&1; }
