@@ -53,7 +53,12 @@ bc250_bios_setup_menu_action() {
   printf 'The toolkit will NOT flash your BIOS. You must perform the firmware\ninstallation yourself using the project instructions.\n\nFirmware project:\n  %s\n\nLatest release:\n  %s\n\n' "$BC250_BIOS_URL" "$BC250_BIOS_RELEASE_URL"
   printf 'Open the firmware project in your browser? [Y/n]: '; read -r answer
   case "$answer" in n|N) info 'Browser launch skipped.'; return 0;; esac
-  if command -v xdg-open >/dev/null 2>&1; then xdg-open "$BC250_BIOS_URL" >/dev/null 2>&1 &; ok 'Firmware project opened in the default browser.'; else info "Open this URL manually: $BC250_BIOS_URL"; fi
+  if command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$BC250_BIOS_URL" >/dev/null 2>&1 &
+    ok 'Firmware project opened in the default browser.'
+  else
+    info "Open this URL manually: $BC250_BIOS_URL"
+  fi
 }
 bc250_platform_status_lines() {
   bc250_bios_ok && ok 'BIOS P3.00 — recommended telemetry firmware' || warn "BIOS $(bc250_bios) — recommended P3.00 not detected"
