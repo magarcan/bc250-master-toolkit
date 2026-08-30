@@ -18,18 +18,11 @@ bc250_gpu_oc_profile_file() { case "$1" in stock|balanced|aggressive|maximum-exp
 bc250_gpu_oc_profile_value() { local name="$1" key="$2" file; file=$(bc250_gpu_oc_profile_file "$name"); [ -r "$file" ] || return 1; awk -v n="$name" -v k="$key" '$0~/^name = /{cur=$0;gsub(/^name = |"/,"",cur)} cur==n && $0~("^" k "[[:space:]]*="){sub(/^[^=]*=[[:space:]]*/,"");gsub(/"/,"");print;exit}' "$file"; }
 bc250_gpu_oc_profile_exists() { [ -n "$(bc250_gpu_oc_profile_value "$1" frequency_mhz)" ] && [ -n "$(bc250_gpu_oc_profile_value "$1" voltage_mv)" ]; }
 
-# The governor TOML is root-owned by design. Runtime OC state is mirrored to
-# this read-only file so informational status commands never need sudo.
 bc250_gpu_oc_publish_state() {
   local f="$1" v="$2" m="$3"
   mkdir -p "$GPU_OC_STATE_DIR"
   umask 022
-  cat > "$GPU_OC_PUBLIC_STATE" <<EOF
-GPU_OC_PROFILE=$(printf '%q' "$(bc250_gpu_oc_active_profile)")
-GPU_OC_MAX_MHZ=$f
-GPU_OC_MIN_MHZ=$m
-GPU_OC_VOLTAGE_MV=$v
-EOF
+  printf 'GPU_OC_PROFILE=%q\nGPU_OC_MAX_MHZ=%s\nGPU_OC_MIN_MHZ=%s\nGPU_OC_VOLTAGE_MV=%s\n' "$(bc250_gpu_oc_active_profile)" "$f" "$m" "$v" > "$GPU_OC_PUBLIC_STATE"
   chmod 0644 "$GPU_OC_PUBLIC_STATE" "$GPU_OC_STATE" 2>/dev/null || true
 }
 
@@ -43,45 +36,25 @@ bc250_gpu_oc_range_from_public() {
 
 bc250_gpu_oc_status() {
   local range min max profile freq volt dpm card
-  range=$(bc250_gpu_oc_range_from_public 2>/dev/null || true)
+  range=$(bc250_gpu_oc_range 2>/dev/null || bc250_gpu_oc_range_from_public 2>/dev/null || true)
   profile=$(bc250_gpu_oc_active_profile)
-
-  # Legacy installations may have the profile marker but not the public
-  # state file. Recover informational values without reading the root-owned
-  # governor configuration. This also makes upgrades from <=1.10.1 seamless.
-  if [ -z "$range" ] && [ "$profile" != none ]; then
-    if [[ "$profile" =~ ^manual-([0-9]+)mhz-([0-9]+)mv$ ]]; then
-      freq="${BASH_REMATCH[1]}"; volt="${BASH_REMATCH[2]}"
-    else
-      freq=$(bc250_gpu_oc_profile_value "$profile" frequency_mhz 2>/dev/null || true)
-      volt=$(bc250_gpu_oc_profile_value "$profile" voltage_mv 2>/dev/null || true)
-    fi
-  fi
-
   if [ -r "$GPU_OC_PUBLIC_STATE" ]; then
     freq=$(sed -n 's/^GPU_OC_MAX_MHZ=//p' "$GPU_OC_PUBLIC_STATE")
     volt=$(sed -n 's/^GPU_OC_VOLTAGE_MV=//p' "$GPU_OC_PUBLIC_STATE")
+  elif [[ "$profile" =~ ^manual-([0-9]+)mhz-([0-9]+)mv$ ]]; then
+    freq="${BASH_REMATCH[1]}"; volt="${BASH_REMATCH[2]}"
+  else
+    freq=$(bc250_gpu_oc_profile_value "$profile" frequency_mhz 2>/dev/null || true)
+    volt=$(bc250_gpu_oc_profile_value "$profile" voltage_mv 2>/dev/null || true)
   fi
-
   if [ -z "$range" ]; then
-    # Last resort for a pre-1.10.2 installation: do not fail and do not ask
-    # for sudo. The active profile/target remains useful even if its public
-    # range state has not yet been generated.
-    if [ "$profile" = none ] && [ -z "$freq" ]; then
-      warn 'GPU OC state is not available; apply a profile or manual setting once.'
-      return 1
-    fi
+    if [ "$profile" = none ] && [ -z "$freq" ]; then warn 'GPU OC state is not available; apply a profile or manual setting once.'; return 1; fi
     printf 'GPU OC/UV control\n  Active profile        : %s\n' "$profile"
     [ -n "$freq" ] && [ -n "$volt" ] && printf '  Target                : %s MHz @ %s mV\n' "$freq" "$volt"
-    printf '  Governor range        : N/A (legacy state)\n'
-    printf '  Config                : %s\n' "$GPU_OC_CONFIG"
-    echo; info 'Run a GPU OC operation once to publish the read-only runtime state.'
-    return 0
+    printf '  Governor range        : N/A (legacy state)\n  Config                : %s\n' "$GPU_OC_CONFIG"
+    echo; info 'Run a GPU OC operation once to publish the read-only runtime state.'; return 0
   fi
-
-  min=${range%%|*}; max=${range#*|}
-  card=$(bc250_gpu_card 2>/dev/null || true)
-  dpm=$(bc250_gpu_dpm_range "$card" "$(bc250_card_path "$card")" 2>/dev/null || true)
+  min=${range%%|*}; max=${range#*|}; card=$(bc250_gpu_card 2>/dev/null || true); dpm=$(bc250_gpu_dpm_range "$card" "$(bc250_card_path "$card")" 2>/dev/null || true)
   printf 'GPU OC/UV control\n  Active profile        : %s\n' "$profile"
   if [[ "$dpm" =~ ^[0-9]+[[:space:]]+[0-9]+$ ]]; then printf '  DPM hardware          : %s–%s MHz\n' "${dpm% *}" "${dpm#* }"; else printf '  DPM hardware          : N/A\n'; fi
   printf '  Governor range        : %s–%s MHz\n' "$min" "$max"
