@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+set -uo pipefail
+VERSION=1.9.6
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+for f in "$ROOT"/lib/hardware.sh "$ROOT"/lib/memory.sh "$ROOT"/lib/extras.sh "$ROOT"/lib/cu.sh; do [ -r "$f" ] && source "$f"; done
+
+banner() {
+  printf '\n'
+  printf '╔══════════════════════════════════════════════════════════════════╗\n'
+  printf '║                    BC-250 MASTER TOOLKIT                       ║\n'
+  printf '║                 CachyOS • validation-first                     ║\n'
+  printf '║                         v%-5s                                ║\n' "$VERSION"
+  printf '╚══════════════════════════════════════════════════════════════════╝\n'
+}
+ok(){ printf '[ OK ] %s\n' "$*"; }
+warn(){ printf '[WARN] %s\n' "$*"; }
+info(){ printf '[INFO] %s\n' "$*"; }
+die(){ printf '[ERR ] %s\n' "$*" >&2; exit 1; }
+need_root(){ [ "$EUID" -eq 0 ] || die "This operation requires root. Run with sudo."; }
+
+preflight() {
+  banner; echo '== 00 — PREFLIGHT (READ-ONLY) =='; echo
+  local card bios kernel gov
+  card=$(bc250_gpu_card 2>/dev/null || true); bios=$(bc250_bios); kernel=$(uname -r)
+  [ "$card" = card* ] && ok "AMD BC-250 detected (PCI 1002:13fe)." || die 'AMD BC-250 GPU was not detected.'
+  printf '\n  OS              : %s\n  Kernel          : %s\n  BIOS            : %s\n' "$(. /etc/os-release; echo "$NAME")" "$kernel" "$bios"
+  printf '  CPU             : %sC / %sT\n' "$(lscpu | awk -F: '/Core\(s\) per socket/{gsub(/ /,"",$2);print $2;exit}')" "$(nproc)"
+  printf '  CPU driver      : %s\n' "$(basename "$(readlink /sys/devices/system/cpu/cpu0/cpufreq 2>/dev/null)" 2>/dev/null || echo N/A)"
+  printf '  CPU governor    : %s\n' "$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo N/A)"
+  printf '  GPU             : %s\n' "$card"
+  if [ -n "$card" ]; then
+    local h; h=$(bc250_hwmon "$card" 2>/dev/null || true)
+    printf '  GPU SCLK        : %s MHz\n' "$(bc250_gpu_sclk "$h")"
+    printf '  GPU busy        : %s%%\n' "$(bc250_gpu_busy "$card")"
+    printf '  GPU temp        : %s°C\n' "$(bc250_gpu_temp "$h")"
+  fi
+  echo
+  if bc250_bios_ok; then ok 'BIOS P3.00 detected — BC-250 telemetry profile.'; else warn "BIOS $(bc250_bios) — expected P3.00 telemetry profile."; fi
+  if bc250_kernel_ok; then ok 'CachyOS BC-250 kernel detected.'; else warn "Kernel $kernel does not contain the BC-250 marker."; fi
+  command -v cpupower >/dev/null && ok 'cpupower available' || warn 'cpupower missing'
+  command -v vulkaninfo >/dev/null && ok 'vulkaninfo available' || warn 'vulkaninfo missing'
+  command -v cyan-skillfish-governor-smu >/dev/null || true
+  [ -x /usr/bin/cyan-skillfish-governor-smu ] && ok 'Cyan-Skillfish binary installed' || warn 'Cyan-Skillfish binary missing'
+  [ -f /etc/cyan-skillfish-governor-smu/config.toml ] && ok 'Cyan-Skillfish configuration present' || warn 'Cyan-Skillfish configuration missing'
+  bc250_governor_ok && ok 'GPU governor service active' || warn 'GPU governor service inactive'
+  bc250_telemetry_ok && ok 'GPU telemetry interfaces available' || warn 'GPU telemetry interfaces incomplete'
+  [ -n "$card" ] && [ -d "/sys/class/drm/$card/device" ] && ok 'GPU DPM interface available' || warn 'GPU DPM interface unavailable'
+  if [ -n "$card" ] && [ -r "/sys/class/drm/$card/device/mem_info_vram_total" ]; then ok 'VRAM telemetry available'; else warn 'VRAM telemetry unavailable'; fi
+  [ -x /usr/local/bin/bc250-cu-live-manager ] && ok 'CU/WGP manager installed' || warn 'CU/WGP manager missing — run: sudo ./bc250-master-toolkit cu install'
+  echo
+}
+
+status() {
+  banner; echo 'Hardware'
+  printf '  BIOS                   %s\n' "$(bc250_bios)"
+  printf '  Kernel                 %s\n' "$(uname -r)"
+  printf '  CPU                    %sC / %sT\n' "$(lscpu | awk -F: '/Core\(s\) per socket/{gsub(/ /,"",$2);print $2;exit}')" "$(nproc)"
+  printf '  CPU governor           %s\n' "$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo N/A)"
+  local card h vr; card=$(bc250_gpu_card 2>/dev/null || true)
+  printf '  GPU                    %s\n' "${card:-N/A}"
+  if [ -n "$card" ]; then h=$(bc250_hwmon "$card" 2>/dev/null || true); vr=$(bc250_gpu_vram "$card"); printf '  GPU SCLK               %s MHz\n  GPU busy               %s%%\n  GPU temp               %s°C\n  VRAM                   %s MB / %s MB\n  VRAM MCLK              %s MHz\n' "$(bc250_gpu_sclk "$h")" "$(bc250_gpu_busy "$card")" "$(bc250_gpu_temp "$h")" "${vr% *}" "${vr#* }" "$(bc250_gpu_mclk "$h")"; fi
+  printf '  CPU temp               %s°C\n' "$(bc250_cpu_temp)"
+  echo; bc250_bios_ok && ok 'BIOS: P3.00 telemetry profile' || warn 'BIOS: not the expected P3.00 telemetry profile'
+  bc250_kernel_ok && ok 'Kernel: CachyOS BC-250' || warn 'Kernel: BC-250 marker not detected'
+  bc250_governor_ok && ok 'GPU governor: Cyan-Skillfish SMU ACTIVE' || warn 'GPU governor: inactive'
+  [ -x /usr/local/bin/bc250-cu-live-manager ] && ok 'CU/WGP manager: installed' || warn 'CU/WGP manager: missing'
+  echo; extras_status_cmd
+}
+
+extras_status_cmd(){ banner; echo 'System extras'; bc250_extras_status; }
+memory(){ banner; echo 'Memory / UMA status'; local x; x=$(bc250_memory_status); set -- $x; printf '  System RAM             %s MB\n  Available RAM          %s MB\n  GPU VRAM               %s/%s MB\n' "$1" "$2" "$3" "$4"; echo '  Recommended UMA starting points:'; bc250_memory_recommendations; echo; info 'UMA_SIZE / RAM-VRAM split is configured in BIOS; toolkit does not modify it.'; }
+cpu(){ banner; echo 'CPU / ACPI status'; printf '  Topology               %sC / %sT\n  Driver                 %s\n  Governor               %s\n  CPU 0 current          %s MHz\n  CPU temperature        %s°C\n' "$(lscpu | awk -F: '/Core\(s\) per socket/{gsub(/ /,"",$2);print $2;exit}')" "$(nproc)" "$(basename "$(readlink /sys/devices/system/cpu/cpu0/cpufreq 2>/dev/null)" 2>/dev/null || echo N/A)" "$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo N/A)" "$(bc250_cpu_freq)" "$(bc250_cpu_temp)"; ok 'CPU OC/UV profiles are not applied yet; CPU overclock research is the next development phase.'; }
+gpu_status(){ banner; echo 'Cyan-Skillfish Governor SMU'; systemctl is-active --quiet cyan-skillfish-governor-smu.service && echo '  Service              : active' || echo '  Service              : inactive'; [ -f /etc/cyan-skillfish-governor-smu/config.toml ] && sed -n '/^fix-metrics\|^fix-freq\|^method\|^set-method/p' /etc/cyan-skillfish-governor-smu/config.toml | sed 's/^/  /'; local card h vr; card=$(bc250_gpu_card 2>/dev/null || true); if [ -n "$card" ]; then h=$(bc250_hwmon "$card"); vr=$(bc250_gpu_vram "$card"); printf '  GPU SCLK              : %s MHz\n  GPU busy              : %s%%\n  GPU temp              : %s°C\n  VRAM                  : %s/%s MB\n  VRAM MCLK             : %s MHz\n  CPU temp              : %s°C\n' "$(bc250_gpu_sclk "$h")" "$(bc250_gpu_busy "$card")" "$(bc250_gpu_temp "$h")" "${vr% *}" "${vr#* }" "$(bc250_gpu_mclk "$h")" "$(bc250_cpu_temp)"; fi; }
+gpu_profiles(){ banner; echo 'GPU OC profiles (informational — never applied automatically)'; awk -F'[ =]+' '/name =|frequency_mhz =|voltage_mv =|classification =/{printf "  %-24s",$1; if($1=="name")printf "%s",$3; else if($1=="frequency_mhz")printf "%s MHz",$3; else if($1=="voltage_mv")printf "%s mV",$3; else printf "%s",$3; if($1=="classification")printf "\n"; else printf " | ";}' "$ROOT/profiles/gpu.toml" 2>/dev/null || cat "$ROOT/profiles/gpu.toml"; echo; info 'The toolkit does not benchmark or automatically apply an OC profile. The user chooses the target.'; }
+
+usage(){ cat <<EOF
+BC-250 MASTER TOOLKIT v$VERSION
+Usage: $0 <command>
+  preflight              Validate BIOS, BC-250 kernel and telemetry path
+  status                 Full hardware + extras status
+  cpu                    CPU/ACPI telemetry
+  gpu status             GPU governor + GPU/CPU/VRAM telemetry
+  gpu oc profiles        List suggested GPU OC/UV starting points
+  memory                 Show current UMA split/VRAM and recommendations
+  cu install             Download/install CU/WGP live manager
+  cu umr install         Build/install official UMR from upstream source
+  cu status              Show CU manager and UMR status
+  extras status          Show swap/ZRAM/ZSWAP/bootloader state
+  extras swap enable     Enable a swapfile (default 16G)
+  extras zswap enable    Disable ZRAM and enable ZSWAP
+  extras rdseed hide     Add loglevel=0 to the boot command line
+EOF
+}
+
+cmd="${1:-preflight}"
+case "$cmd" in
+  preflight) preflight;; status) status;; cpu) cpu;; memory) memory;;
+  gpu) case "${2:-status}" in status) gpu_status;; oc) [ "${3:-profiles}" = profiles ] && gpu_profiles || die 'No GPU benchmark is provided; use gpu oc profiles.';; *) die 'unknown gpu command';; esac;;
+  cu) need_root; case "${2:-status}" in install) bc250_cu_install;; umr) [ "${3:-}" = install ] && bc250_umr_install || die 'use: cu umr install';; status) bc250_cu_status;; *) die 'unknown cu command';; esac;;
+  extras) need_root; case "${2:-status}" in status) extras_status_cmd;; swap) [ "${3:-}" = enable ] && bc250_swap_enable "${4:-16G}" || die 'use: extras swap enable [size]';; zswap) [ "${3:-}" = enable ] && bc250_zswap_enable || die 'use: extras zswap enable';; rdseed) [ "${3:-}" = hide ] && bc250_rdseed_hide || die 'use: extras rdseed hide';; *) die 'unknown extras command';; esac;;
+  help|-h|--help) usage;; *) die "unknown command: $cmd";;
+esac
