@@ -102,6 +102,20 @@ bc250_gpu_vram() {
   fi
 }
 
+bc250_gpu_dpm_range() {
+  local card="$1" path="$2" min max line freq
+  [ -n "$path" ] || path=$(bc250_card_path "$card") || { echo "N/A N/A"; return; }
+  [ -r "$path/device/pp_dpm_sclk" ] || { echo "N/A N/A"; return; }
+  min=; max=
+  while IFS= read -r line; do
+    [[ "$line" =~ ^[[:space:]]*[0-9]+:[[:space:]]*([0-9]+)[[:space:]]*MHz ]] || continue
+    freq="${BASH_REMATCH[1]}"
+    [ -z "$min" ] && min="$freq"
+    max="$freq"
+  done < "$path/device/pp_dpm_sclk"
+  [ -n "$min" ] && [ -n "$max" ] && printf '%s %s\n' "$min" "$max" || printf 'N/A N/A\n'
+}
+
 bc250_cpu_cores() {
   lscpu -p=CORE 2>/dev/null | grep -v '^#' | sort -u | wc -l
 }

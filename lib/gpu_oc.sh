@@ -6,12 +6,22 @@ GPU_OC_BACKUP="$GPU_OC_STATE_DIR/cyan-skillfish-governor-smu.config.toml.base"
 GPU_OC_STATE="$GPU_OC_STATE_DIR/gpu-profile"
 CYAN_SERVICE="${CYAN_SERVICE:-cyan-skillfish-governor-smu.service}"
 
+bc250_gpu_oc_profile_file() {
+  local name="$1"
+  if [ "$name" = "stock" ] || [ "$name" = "balanced" ] || [ "$name" = "aggressive" ] || [ "$name" = "maximum-experimental" ]; then
+    printf '%s\n' "$ROOT/profiles/gpu.toml"
+  else
+    printf '%s\n' "$ROOT/profiles/gpu-personal.toml"
+  fi
+}
+
 bc250_gpu_oc_profile_value() {
-  local name="$1" key="$2"
+  local name="$1" key="$2" file
+  file=$(bc250_gpu_oc_profile_file "$name")
   awk -v n="$name" -v k="$key" '
     $0 ~ /^name = / { cur=$0; gsub(/^name = |"/,"",cur) }
     cur==n && $0 ~ "^" k " = " { print $3; exit }
-  ' "$ROOT/profiles/gpu.toml" 2>/dev/null | tr -d '"'
+  ' "$file" 2>/dev/null | tr -d '"'
 }
 
 bc250_gpu_oc_profile_exists() {
@@ -20,12 +30,9 @@ bc250_gpu_oc_profile_exists() {
 }
 
 bc250_gpu_oc_range() {
-  local file="$GPU_OC_CONFIG"
-  local content
+  local file="$GPU_OC_CONFIG" content
   if [ -r "$file" ]; then
     content=$(cat "$file")
-  elif [ -f "$file" ] && command -v sudo >/dev/null 2>&1 && content=$(sudo -n cat "$file" 2>/dev/null); then
-    :
   else
     return 1
   fi
@@ -33,7 +40,7 @@ bc250_gpu_oc_range() {
     /^\[frequency-range\]/{inrange=1;next}
     /^\[/{inrange=0}
     inrange && /^[[:space:]]*min[[:space:]]*=/ {min=$0}
-    inrange && /^[[:space:]]*max[[:space:]]*=/ {max=$0}
+    inrange && /^[[:space:]]*max[[:space:]]=/ {max=$0}
     END {gsub(/.*=[[:space:]]*/,"",min);gsub(/.*=[[:space:]]*/,"",max);print min "|" max}
   ' <<< "$content"
 }
@@ -41,14 +48,23 @@ bc250_gpu_oc_range() {
 bc250_gpu_oc_active_profile() { [ -r "$GPU_OC_STATE" ] && cat "$GPU_OC_STATE" || echo none; }
 
 bc250_gpu_oc_status() {
-  local range min max profile
+  local card h dpm range min max profile freq volt
   [ -f "$GPU_OC_CONFIG" ] || { warn 'Cyan-Skillfish configuration not found.'; return 1; }
+  card=$(bc250_gpu_card 2>/dev/null || true)
+  h=$(bc250_hwmon "$card" 2>/dev/null || true)
+  dpm=$(bc250_gpu_dpm_range "$card" "$(bc250_card_path "$card")" 2>/dev/null || true)
   range=$(bc250_gpu_oc_range 2>/dev/null || true)
   min=${range%%|*}; max=${range#*|}; profile=$(bc250_gpu_oc_active_profile)
+  freq=$(bc250_gpu_oc_profile_value "$profile" frequency_mhz 2>/dev/null || true)
+  volt=$(bc250_gpu_oc_profile_value "$profile" voltage_mv 2>/dev/null || true)
   [ -n "$min" ] && [ -n "$max" ] || { warn 'Cyan-Skillfish frequency range could not be read.'; return 1; }
-  printf 'GPU OC/UV control\n  Active profile        : %s\n  Governor range        : %s–%s MHz\n  Config                : %s\n' "$profile" "$min" "$max" "$GPU_OC_CONFIG"
+  printf 'GPU OC/UV control\n  Active profile        : %s\n' "$profile"
+  printf '  DPM hardware         : %s–%s MHz\n' "${dpm% *}" "${dpm#* }"
+  printf '  Governor range       : %s–%s MHz\n' "$min" "$max"
+  [ -n "$freq" ] && [ -n "$volt" ] && printf '  Target               : %s MHz @ %s mV\n' "$freq" "$volt"
+  printf '  Config                : %s\n' "$GPU_OC_CONFIG"
   echo
-  info 'The range is the governor operating envelope. The active profile or manual target defines the top frequency and voltage.'
+  info 'DPM hardware is the kernel-advertised envelope; the governor range is the configured operating envelope.'
 }
 
 bc250_gpu_oc_profiles() {
@@ -111,11 +127,11 @@ bc250_gpu_oc_apply_values() {
 }
 
 bc250_gpu_oc_apply() {
-  local name="${1:-}" freq volt
+  local name="${1:-}" freq volt min_freq
   [ -n "$name" ] || die 'Use: gpu oc apply <profile>'
   bc250_gpu_oc_profile_exists "$name" || die "Unknown GPU OC profile: $name. Use: gpu oc profiles"
-  freq=$(bc250_gpu_oc_profile_value "$name" frequency_mhz); volt=$(bc250_gpu_oc_profile_value "$name" voltage_mv)
-  bc250_gpu_oc_apply_values "$name" "$freq" "$volt"
+  freq=$(bc250_gpu_oc_profile_value "$name" frequency_mhz); volt=$(bc250_gpu_oc_profile_value "$name" voltage_mv); min_freq=$(bc250_gpu_oc_profile_value "$name" min_frequency_mhz)
+  bc250_gpu_oc_apply_values "$name" "$freq" "$volt" "$min_freq"
 }
 
 bc250_gpu_oc_manual() {

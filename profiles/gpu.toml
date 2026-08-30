@@ -3,22 +3,26 @@
 name = "stock"
 frequency_mhz = 1850
 voltage_mv = 930
+min_frequency_mhz = 1000
 classification = "baseline"
 
 [[profile]]
 name = "balanced"
 frequency_mhz = 2000
 voltage_mv = 1000
+min_frequency_mhz = 600
 classification = "tested-on-reference-system"
 
 [[profile]]
 name = "aggressive"
 frequency_mhz = 2100
 voltage_mv = 1025
+min_frequency_mhz = 600
 classification = "experimental"
 
 [[profile]]
 name = "maximum-experimental"
 frequency_mhz = 2200
 voltage_mv = 1050
+min_frequency_mhz = 600
 classification = "experimental"
