@@ -11,7 +11,59 @@ bc250_gpu_oc_read_config() { [ -r "$GPU_OC_CONFIG" ] && cat "$GPU_OC_CONFIG"; }
 bc250_gpu_oc_range() {
   local content
   content=$(bc250_gpu_oc_read_config 2>/dev/null) || return 1
-  awk '/^\[frequency-range\]/{r=1;next}/^\[/{r=0} r&&/^[[:space:]]*min[[:space:]]*=/{min=$0} r&&/^[[:space:]]*max[[:space:]]*=/{max=$0} END{gsub(/.*=[[:space:]]*/,"",min);gsub(/.*=[[:space:]]*/,"",max);if(min!=""&&max!="")print min "|" max}' <<< "$content"
+  python3 - "$content" <<'PY'
+import sys
+try:
+    import tomllib
+except ImportError:
+    raise SystemExit(1)
+
+try:
+    data = tomllib.loads(sys.argv[1])
+except Exception:
+    raise SystemExit(1)
+
+# Cyan-Skillfish SMU has existed with several config schemas. Prefer the
+# explicit governor envelope, then fall back to the voltage/frequency curve.
+for section_name in ("frequency-range", "frequency_range", "frequency"):
+    section = data.get(section_name)
+    if isinstance(section, dict):
+        mn = section.get("min")
+        mx = section.get("max")
+        if isinstance(mn, (int, float)) and isinstance(mx, (int, float)):
+            print(f"{int(mn)}|{int(mx)}")
+            raise SystemExit(0)
+
+for min_key, max_key in (("min_frequency", "max_frequency"),
+                         ("min_frequency_mhz", "max_frequency_mhz"),
+                         ("frequency_min", "frequency_max")):
+    mn = data.get(min_key)
+    mx = data.get(max_key)
+    if isinstance(mn, (int, float)) and isinstance(mx, (int, float)):
+        print(f"{int(mn)}|{int(mx)}")
+        raise SystemExit(0)
+
+# safe-points / safe_points define the actual frequency curve when no
+# explicit min/max envelope exists. The envelope is the lowest/highest point.
+for key in ("safe-points", "safe_points"):
+    points = data.get(key)
+    if isinstance(points, list):
+        freqs = []
+        for point in points:
+            if isinstance(point, (list, tuple)) and point:
+                value = point[0]
+            elif isinstance(point, dict):
+                value = point.get("frequency")
+            else:
+                continue
+            if isinstance(value, (int, float)):
+                freqs.append(int(value))
+        if freqs:
+            print(f"{min(freqs)}|{max(freqs)}")
+            raise SystemExit(0)
+
+raise SystemExit(1)
+PY
 }
 bc250_gpu_oc_active_profile() { [ -r "$GPU_OC_STATE" ] && cat "$GPU_OC_STATE" || echo none; }
 bc250_gpu_oc_profile_file() { case "$1" in stock|balanced|aggressive|maximum-experimental) printf '%s\n' "$ROOT/profiles/gpu.toml";; *) printf '%s\n' "$ROOT/profiles/gpu-personal.toml";; esac; }
@@ -39,6 +91,23 @@ bc250_gpu_oc_status() {
   local range min max profile freq volt dpm card
   profile=$(bc250_gpu_oc_active_profile)
   range=$(bc250_gpu_oc_range_from_public 2>/dev/null || true)
+  # A privileged status invocation can read the real Cyan-Skillfish config.
+  # This also repairs the public state for users running the toolkit normally.
+  if [ -z "$range" ]; then
+    range=$(bc250_gpu_oc_range 2>/dev/null || true)
+    if [ -n "$range" ] && [ "$EUID" -eq 0 ]; then
+      min=${range%%|*}; max=${range#*|}
+      if [ -r "$GPU_OC_PUBLIC_STATE" ]; then
+        freq=$(sed -n 's/^GPU_OC_MAX_MHZ=//p' "$GPU_OC_PUBLIC_STATE")
+        volt=$(sed -n 's/^GPU_OC_VOLTAGE_MV=//p' "$GPU_OC_PUBLIC_STATE")
+      else
+        freq="$(bc250_gpu_oc_profile_value "$profile" frequency_mhz 2>/dev/null || true)"
+        volt="$(bc250_gpu_oc_profile_value "$profile" voltage_mv 2>/dev/null || true)"
+        [[ "$profile" =~ ^manual-([0-9]+)mhz-([0-9]+)mv$ ]] && { freq="${BASH_REMATCH[1]}"; volt="${BASH_REMATCH[2]}"; }
+      fi
+      [ -n "$freq" ] && [ -n "$volt" ] && bc250_gpu_oc_publish_state "$freq" "$volt" "$min" >/dev/null 2>&1 || true
+    fi
+  fi
   if [ -r "$GPU_OC_PUBLIC_STATE" ]; then
     freq=$(sed -n 's/^GPU_OC_MAX_MHZ=//p' "$GPU_OC_PUBLIC_STATE")
     volt=$(sed -n 's/^GPU_OC_VOLTAGE_MV=//p' "$GPU_OC_PUBLIC_STATE")
@@ -55,9 +124,9 @@ bc250_gpu_oc_status() {
     fi
     printf 'GPU OC/UV control\n  Active profile        : %s\n' "$profile"
     [ -n "$freq" ] && [ -n "$volt" ] && printf '  Target                : %s MHz @ %s mV\n' "$freq" "$volt"
-    printf '  Governor range        : N/A (legacy state)\n  Config                : %s\n' "$GPU_OC_CONFIG"
+    printf '  Governor range        : Unknown\n  Config                : %s\n' "$GPU_OC_CONFIG"
     echo
-    info 'Run a GPU OC operation once to publish the read-only runtime range.'
+    warn 'Governor range could not be determined from the Cyan-Skillfish configuration or published toolkit state.'
     return 0
   fi
   min=${range%%|*}; max=${range#*|}
