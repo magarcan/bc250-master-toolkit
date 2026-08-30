@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
-VERSION="1.10.0"
+VERSION="1.10.1"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 for f in "$ROOT"/lib/hardware.sh "$ROOT"/lib/memory.sh "$ROOT"/lib/extras.sh "$ROOT"/lib/cu.sh "$ROOT"/lib/gpu_oc.sh; do [ -r "$f" ] && source "$f"; done
 if [ -t 1 ] && [ "${NO_COLOR:-}" = "" ]; then
@@ -26,8 +26,8 @@ Usage: $0 <command>
   gpu oc status
   gpu oc apply <profile>
   gpu oc apply-personal <name>
-  gpu oc manual <MHz> <mV>
-  gpu oc create <name> <MHz> <mV>
+  gpu oc manual <maxMHz> <mV> [minMHz]
+  gpu oc create <name> <maxMHz> <mV> [minMHz]
   gpu oc reset
   memory
   cu install | cu umr install | cu status
@@ -37,7 +37,7 @@ EOF
 cmd="${1:-preflight}"
 case "$cmd" in
  preflight) preflight;; status) status;; cpu) cpu;; memory) memory;;
- gpu) case "${2:-status}" in status) gpu_status;; oc) case "${3:-profiles}" in profiles) bc250_gpu_oc_profiles;; status) bc250_gpu_oc_status;; apply) bc250_gpu_oc_apply "${4:-}";; apply-personal) bc250_gpu_oc_apply_personal "${4:-}";; manual) bc250_gpu_oc_manual "${4:-}" "${5:-}";; create) bc250_gpu_oc_create "${4:-}" "${5:-}" "${6:-}";; reset) bc250_gpu_oc_reset;; *) die 'Use: gpu oc profiles | status | apply <name> | apply-personal <name> | manual <MHz> <mV> | create <name> <MHz> <mV> | reset';; esac;; *) die 'unknown gpu command';; esac;;
+ gpu) case "${2:-status}" in status) gpu_status;; oc) case "${3:-profiles}" in profiles) bc250_gpu_oc_profiles;; status) bc250_gpu_oc_status;; apply) bc250_gpu_oc_apply "${4:-}";; apply-personal) bc250_gpu_oc_apply_personal "${4:-}";; manual) bc250_gpu_oc_manual "${4:-}" "${5:-}" "${6:-}";; create) bc250_gpu_oc_create "${4:-}" "${5:-}" "${6:-}" "${7:-}";; reset) bc250_gpu_oc_reset;; *) die 'Use: gpu oc profiles | status | apply <name> | apply-personal <name> | manual <maxMHz> <mV> [minMHz] | create <name> <maxMHz> <mV> [minMHz] | reset';; esac;; *) die 'unknown gpu command';; esac;;
  cu) case "${2:-status}" in status) bc250_cu_status;; install) need_root; bc250_cu_install;; umr) [ "${3:-}" = install ] || die 'Use: cu umr install'; need_root; bc250_umr_install;; *) die 'unknown cu command';; esac;;
  extras) case "${2:-status}" in status) extras_status_cmd;; swap) [ "${3:-}" = enable ] || die 'Use: extras swap enable [size]'; need_root; bc250_swap_enable "${4:-16G}";; zswap) [ "${3:-}" = enable ] || die 'Use: extras zswap enable'; need_root; bc250_zswap_enable;; rdseed) [ "${3:-}" = hide ] || die 'Use: extras rdseed hide'; need_root; bc250_rdseed_hide;; *) die 'unknown extras command';; esac;;
  help|-h|--help) usage;; *) die "unknown command: $cmd";; esac
