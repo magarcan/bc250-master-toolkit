@@ -6,10 +6,19 @@ GPU_OC_BACKUP="$GPU_OC_STATE_DIR/cyan-skillfish-governor-smu.config.toml.base"
 GPU_OC_STATE="$GPU_OC_STATE_DIR/gpu-profile"
 CYAN_SERVICE="${CYAN_SERVICE:-cyan-skillfish-governor-smu.service}"
 
+bc250_gpu_oc_read_config() {
+  if [ -r "$GPU_OC_CONFIG" ]; then
+    cat "$GPU_OC_CONFIG"
+  elif command -v sudo >/dev/null 2>&1 && sudo -n cat "$GPU_OC_CONFIG" 2>/dev/null; then
+    return 0
+  else
+    return 1
+  fi
+}
+
 bc250_gpu_oc_range() {
-  local file="$GPU_OC_CONFIG" content
-  [ -r "$file" ] || return 1
-  content=$(cat "$file") || return 1
+  local content
+  content=$(bc250_gpu_oc_read_config) || return 1
   awk '/^\[frequency-range\]/{r=1;next}/^\[/{r=0} r&&/^[[:space:]]*min[[:space:]]*=/{min=$0} r&&/^[[:space:]]*max[[:space:]]*=/{max=$0} END{gsub(/.*=[[:space:]]*/,"",min);gsub(/.*=[[:space:]]*/,"",max); if(min!=""&&max!="") print min "|" max}' <<< "$content"
 }
 
@@ -30,7 +39,6 @@ bc250_gpu_oc_profile_exists() { [ -n "$(bc250_gpu_oc_profile_value "$1" frequenc
 
 bc250_gpu_oc_status() {
   local range min max profile freq volt dpm card
-  [ -r "$GPU_OC_CONFIG" ] || { warn 'Cyan-Skillfish configuration not found.'; return 1; }
   range=$(bc250_gpu_oc_range 2>/dev/null || true)
   min=${range%%|*}; max=${range#*|}
   [ -n "$min" ] && [ -n "$max" ] || { warn 'Cyan-Skillfish frequency range could not be read.'; return 1; }
@@ -78,6 +86,7 @@ s=s.rstrip()+f'\n\n[[safe-points]]\nfrequency = {mx}\nvoltage = {v}\n'
 open(dst,'w',encoding='utf-8').write(s)
 PY
   mv "$tmp" "$GPU_OC_CONFIG" || die 'Could not update governor configuration.'
+  chmod 0644 "$GPU_OC_CONFIG" 2>/dev/null || true
 }
 
 bc250_gpu_oc_apply_values() {
@@ -101,5 +110,6 @@ bc250_gpu_oc_manual() { local f="${1:-}" v="${2:-}" m="${3:-}"; [ -n "$f" ]&&[ -
 bc250_gpu_oc_reset() {
   need_root; [ -f "$GPU_OC_BACKUP" ] || die 'No saved pre-profile configuration exists; nothing to reset.'
   cp -a "$GPU_OC_BACKUP" "$GPU_OC_CONFIG" || die 'Could not restore the saved Cyan-Skillfish configuration.'
+  chmod 0644 "$GPU_OC_CONFIG" 2>/dev/null || true
   rm -f "$GPU_OC_STATE"; systemctl restart "$CYAN_SERVICE" 2>/dev/null || die 'Cyan-Skillfish governor failed to restart after reset.'; ok 'GPU OC/UV reset; original Cyan-Skillfish configuration restored.'
 }
