@@ -1,4 +1,4 @@
-# Conservative BC-250 GPU profiles. Informational only: the toolkit never applies these automatically.
+# Conservative BC-250 GPU profiles. Not applied automatically; the user explicitly selects one.
 [[profile]]
 name = "stock"
 frequency_mhz = 1850
