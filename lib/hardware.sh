@@ -108,7 +108,7 @@ bc250_gpu_dpm_range() {
   [ -r "$path/device/pp_dpm_sclk" ] || { echo "N/A N/A"; return; }
   min=; max=
   while IFS= read -r line; do
-    [[ "$line" =~ ^[[:space:]]*[0-9]+:[[:space:]]*([0-9]+)[[:space:]]*MHz ]] || continue
+    [[ "$line" =~ ^[[:space:]]*[0-9]+:[[:space:]]*([0-9]+)[[:space:]]*[Mm][Hh][Zz] ]] || continue
     freq="${BASH_REMATCH[1]}"
     [ -z "$min" ] && min="$freq"
     max="$freq"
