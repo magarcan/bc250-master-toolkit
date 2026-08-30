@@ -15,99 +15,132 @@ bc250_gpu_oc_profile_value() {
 
 bc250_gpu_oc_profile_exists() {
   local name="$1"
-  [ -n "$(bc250_gpu_oc_profile_value "$name" frequency_mhz)" ] && \
-  [ -n "$(bc250_gpu_oc_profile_value "$name" voltage_mv)" ]
+  [ -n "$(bc250_gpu_oc_profile_value "$name" frequency_mhz)" ] && [ -n "$(bc250_gpu_oc_profile_value "$name" voltage_mv)" ]
 }
 
 bc250_gpu_oc_range() {
-  local f=/etc/cyan-skillfish-governor-smu/config.toml
   awk '
-    /^\[frequency-range\]/{inrange=1; next}
+    /^\[frequency-range\]/{inrange=1;next}
     /^\[/{inrange=0}
-    inrange && /^min[[:space:]]*=/ {min=$0}
-    inrange && /^max[[:space:]]*=/ {max=$0}
-    END {print min "|" max}
-  ' "$f" 2>/dev/null
+    inrange && /^[[:space:]]*min[[:space:]]*=/ {min=$0}
+    inrange && /^[[:space:]]*max[[:space:]]=/ {max=$0}
+    END {gsub(/.*=[[:space:]]*/,"",min);gsub(/.*=[[:space:]]*/,"",max);print min "|" max}
+  ' "$GPU_OC_CONFIG" 2>/dev/null
 }
 
-bc250_gpu_oc_active_profile() {
-  [ -r "$GPU_OC_STATE" ] && cat "$GPU_OC_STATE" || echo none
-}
+bc250_gpu_oc_active_profile() { [ -r "$GPU_OC_STATE" ] && cat "$GPU_OC_STATE" || echo none; }
 
 bc250_gpu_oc_status() {
   local range min max profile
   [ -r "$GPU_OC_CONFIG" ] || { warn 'Cyan-Skillfish configuration not found.'; return 1; }
-  range=$(bc250_gpu_oc_range)
-  min=${range%%|*}; max=${range#*|}
-  printf 'GPU OC/UV control\n'
-  printf '  Active profile        : %s\n' "$(bc250_gpu_oc_active_profile)"
-  printf '  Governor range        : %s / %s\n' "${min#*= }" "${max#*= }"
-  printf '  Config                : %s\n' "$GPU_OC_CONFIG"
+  range=$(bc250_gpu_oc_range); min=${range%%|*}; max=${range#*|}; profile=$(bc250_gpu_oc_active_profile)
+  printf 'GPU OC/UV control\n  Active profile        : %s\n  Governor range        : %s–%s MHz\n  Config                : %s\n' "$profile" "$min" "$max" "$GPU_OC_CONFIG"
   echo
-  info 'The range is the governor operating envelope. The selected profile defines its top frequency and target voltage.'
+  info 'The range is the governor operating envelope. The active profile or manual target defines the top frequency and voltage.'
 }
 
 bc250_gpu_oc_profiles() {
-  banner
-  heading 'GPU OC profiles'
+  banner; heading 'GPU OC profiles'
   cat "$ROOT/profiles/gpu.toml" 2>/dev/null || { warn 'GPU profile file missing.'; return 1; }
-  echo
-  info 'Profiles are starting points only. Applying a profile changes the Cyan-Skillfish governor configuration; no benchmark is run automatically.'
+  if [ -r "$ROOT/profiles/gpu-personal.toml" ]; then echo; cat "$ROOT/profiles/gpu-personal.toml"; fi
+  echo; info 'Profiles are starting points only. Applying one changes Cyan-Skillfish; no benchmark is run automatically.'
+  info 'Manual: gpu oc manual <MHz> <mV>   |   Personal profile: gpu oc create <name> <MHz> <mV>'
+}
+
+bc250_gpu_oc_validate() {
+  local freq="$1" volt="$2"
+  [[ "$freq" =~ ^[0-9]+$ && "$volt" =~ ^[0-9]+$ ]] || die 'Frequency and voltage must be integer values.'
+  (( freq >= 300 && freq <= 2230 )) || die 'Frequency must be between 300 and 2230 MHz.'
+  (( volt >= 600 && volt <= 1200 )) || die 'Voltage must be between 600 and 1200 mV.'
+}
+
+bc250_gpu_oc_write() {
+  local freq="$1" volt="$2" min_freq="$3" tmp
+  mkdir -p "$GPU_OC_STATE_DIR"
+  [ -f "$GPU_OC_BACKUP" ] || cp -a "$GPU_OC_CONFIG" "$GPU_OC_BACKUP" || die 'Could not create governor configuration backup.'
+  tmp=$(mktemp)
+  python3 - "$GPU_OC_CONFIG" "$tmp" "$min_freq" "$freq" "$volt" <<'PY'
+import re, sys
+src,dst,minf,maxf,volt=sys.argv[1:]
+s=open(src,encoding='utf-8').read()
+m=re.search(r'^\[frequency-range\][\s\S]*?(?=^\[|\Z)',s,re.M)
+if not m:
+    s=s.rstrip()+f'\n\n[frequency-range]\nmin = {minf}\nmax = {maxf}\n'
+else:
+    b=m.group(0)
+    b=re.sub(r'(^min\s*=\s*)\d+',r'\g<1>'+minf,b,count=1,flags=re.M)
+    b=re.sub(r'(^max\s*=\s*)\d+',r'\g<1>'+maxf,b,count=1,flags=re.M)
+    if not re.search(r'^min\s*=',b,re.M): b+=f'min = {minf}\n'
+    if not re.search(r'^max\s*=',b,re.M): b+=f'max = {maxf}\n'
+    s=s[:m.start()]+b+s[m.end():]
+# Keep all existing safe points except a point at the selected top frequency.
+s=re.sub(r'\[\[safe-points\]\]\s*\nfrequency\s*=\s*'+re.escape(maxf)+r'\s*\nvoltage\s*=\s*\d+\s*\n?','',s,flags=re.M)
+s=s.rstrip()+f'\n\n[[safe-points]]\nfrequency = {maxf}\nvoltage = {volt}\n'
+open(dst,'w',encoding='utf-8').write(s)
+PY
+  mv "$tmp" "$GPU_OC_CONFIG" || die 'Could not update governor configuration.'
+}
+
+bc250_gpu_oc_apply_values() {
+  need_root
+  local name="$1" freq="$2" volt="$3" range min_freq
+  bc250_gpu_oc_validate "$freq" "$volt"
+  [ -f "$GPU_OC_CONFIG" ] || die "Cyan-Skillfish configuration not found: $GPU_OC_CONFIG"
+  range=$(bc250_gpu_oc_range); min_freq=${range%%|*}; [ -n "$min_freq" ] || min_freq=1000
+  (( min_freq <= freq )) || min_freq="$freq"
+  bc250_gpu_oc_write "$freq" "$volt" "$min_freq"
+  printf '%s\n' "$name" > "$GPU_OC_STATE"
+  systemctl restart "$CYAN_SERVICE" 2>/dev/null || die 'Cyan-Skillfish governor failed to restart.'
+  systemctl is-active --quiet "$CYAN_SERVICE" || die 'Cyan-Skillfish governor is not active after profile application.'
+  ok "GPU OC/UV applied: $name — ${freq} MHz @ ${volt} mV"
+  printf '  Governor range        : %s–%s MHz\n' "$min_freq" "$freq"
+  info 'No benchmark was run. Validate the selected setting with your own workload.'
 }
 
 bc250_gpu_oc_apply() {
-  need_root
-  local name="${1:-}" freq volt range_min tmp backup
+  local name="${1:-}" freq volt
   [ -n "$name" ] || die 'Use: gpu oc apply <profile>'
   bc250_gpu_oc_profile_exists "$name" || die "Unknown GPU OC profile: $name. Use: gpu oc profiles"
-  [ -f "$GPU_OC_CONFIG" ] || die "Cyan-Skillfish configuration not found: $GPU_OC_CONFIG"
+  freq=$(bc250_gpu_oc_profile_value "$name" frequency_mhz); volt=$(bc250_gpu_oc_profile_value "$name" voltage_mv)
+  bc250_gpu_oc_apply_values "$name" "$freq" "$volt"
+}
 
-  freq=$(bc250_gpu_oc_profile_value "$name" frequency_mhz)
-  volt=$(bc250_gpu_oc_profile_value "$name" voltage_mv)
-  range_min=$(bc250_gpu_oc_range | cut -d'|' -f1 | sed 's/.*= *//')
-  [ -n "$range_min" ] || range_min=1000
+bc250_gpu_oc_manual() {
+  local freq="${1:-}" volt="${2:-}"
+  [ -n "$freq" ] && [ -n "$volt" ] || die 'Use: gpu oc manual <MHz> <mV>'
+  bc250_gpu_oc_apply_values "manual-${freq}mhz-${volt}mv" "$freq" "$volt"
+}
 
-  if [ ! -f "$GPU_OC_BACKUP" ]; then
-    mkdir -p "$GPU_OC_STATE_DIR"
-    cp -a "$GPU_OC_CONFIG" "$GPU_OC_BACKUP" || die 'Could not create governor configuration backup.'
-  fi
+bc250_gpu_oc_create() {
+  need_root
+  local name="${1:-}" freq="${2:-}" volt="${3:-}" file
+  [ -n "$name" ] && [ -n "$freq" ] && [ -n "$volt" ] || die 'Use: gpu oc create <name> <MHz> <mV>'
+  [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || die 'Profile name may contain only letters, numbers, dot, underscore and hyphen.'
+  bc250_gpu_oc_validate "$freq" "$volt"
+  file="$ROOT/profiles/gpu-personal.toml"
+  if [ ! -f "$file" ]; then printf '# User-created BC-250 GPU profiles\n' > "$file"; fi
+  grep -q "^name = \"$name\"$" "$file" && die "Personal profile already exists: $name"
+  printf '\n[[profile]]\nname = "%s"\nfrequency_mhz = %s\nvoltage_mv = %s\nclassification = "user"\n' "$name" "$freq" "$volt" >> "$file"
+  ok "Personal GPU profile created: $name — ${freq} MHz @ ${volt} mV"
+  info "Apply it with: gpu oc apply-personal $name"
+}
 
-  tmp=$(mktemp)
-  python3 - "$GPU_OC_CONFIG" "$tmp" "$range_min" "$freq" "$volt" <<'PY'
-import re, sys
-src, dst, min_freq, max_freq, target_mv = sys.argv[1:]
-s = open(src, encoding='utf-8').read()
-# Keep the user's minimum governor frequency and all unrelated settings.
-s, n = re.subn(r'(\[frequency-range\][\s\S]*?^min\s*=\s*)\d+', r'\g<1>' + min_freq, s, count=1, flags=re.M)
-if n == 0:
-    s = s.rstrip() + f'\n\n[frequency-range]\nmin = {min_freq}\nmax = {max_freq}\n'
-else:
-    s, n = re.subn(r'(\[frequency-range\][\s\S]*?^max\s*=\s*)\d+', r'\g<1>' + max_freq, s, count=1, flags=re.M)
-    if n == 0:
-        s = s.rstrip() + f'\nmax = {max_freq}\n'
-# Replace an existing safe point at the target frequency; otherwise append one.
-pattern = rf'(\[\[safe-points\]\]\s*\nfrequency\s*=\s*{re.escape(max_freq)}\s*\nvoltage\s*=\s*)\d+'
-s, n = re.subn(pattern, r'\g<1>' + target_mv, s, count=1, flags=re.M)
-if n == 0:
-    s = s.rstrip() + f'\n\n[[safe-points]]\nfrequency = {max_freq}\nvoltage = {target_mv}\n'
-open(dst, 'w', encoding='utf-8').write(s)
-PY
-  mv "$tmp" "$GPU_OC_CONFIG" || { rm -f "$tmp"; die 'Could not update governor configuration.'; }
-
-  printf '%s\n' "$name" > "$GPU_OC_STATE"
-  systemctl restart cyan-skillfish-governor-smu.service || die 'Cyan-Skillfish governor failed to restart; configuration was changed but service is not active.'
-  systemctl is-active --quiet cyan-skillfish-governor-smu.service || die 'Cyan-Skillfish governor is not active after profile application.'
-  ok "GPU profile applied: $name — ${freq} MHz @ ${volt} mV"
-  printf '  Governor range        : %s–%s MHz\n' "$range_min" "$freq"
-  info 'No benchmark was run. Validate the selected profile with your own workload.'
+bc250_gpu_oc_apply_personal() {
+  local name="${1:-}" file="$ROOT/profiles/gpu-personal.toml" freq volt
+  [ -n "$name" ] || die 'Use: gpu oc apply-personal <name>'
+  [ -r "$file" ] || die 'No personal GPU profiles exist.'
+  freq=$(awk -v n="$name" '$0~/^name = /{cur=$0;gsub(/^name = |"/,"",cur)} cur==n && /^frequency_mhz = /{print $3;exit}' "$file")
+  volt=$(awk -v n="$name" '$0~/^name = /{cur=$0;gsub(/^name = |"/,"",cur)} cur==n && /^voltage_mv = /{print $3;exit}' "$file")
+  [ -n "$freq" ] && [ -n "$volt" ] || die "Unknown personal GPU profile: $name"
+  bc250_gpu_oc_apply_values "$name" "$freq" "$volt"
 }
 
 bc250_gpu_oc_reset() {
   need_root
   [ -f "$GPU_OC_BACKUP" ] || die 'No saved pre-profile configuration exists; nothing to reset.'
-  cp -a "$GPU_OC_BACKUP" "$GPU_OC_CONFIG" || die 'Could not restore the saved governor configuration.'
+  cp -a "$GPU_OC_BACKUP" "$GPU_OC_CONFIG" || die 'Could not restore the saved Cyan-Skillfish configuration.'
   rm -f "$GPU_OC_STATE"
-  systemctl restart cyan-skillfish-governor-smu.service || die 'Cyan-Skillfish governor failed to restart after reset.'
-  systemctl is-active --quiet cyan-skillfish-governor-smu.service || die 'Cyan-Skillfish governor is not active after reset.'
-  ok 'GPU OC profile reset; original Cyan-Skillfish configuration restored.'
+  systemctl restart "$CYAN_SERVICE" 2>/dev/null || die 'Cyan-Skillfish governor failed to restart after reset.'
+  systemctl is-active --quiet "$CYAN_SERVICE" || die 'Cyan-Skillfish governor is not active after reset.'
+  ok 'GPU OC/UV reset; original Cyan-Skillfish configuration restored.'
 }
