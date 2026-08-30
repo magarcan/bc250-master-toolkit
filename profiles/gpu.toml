@@ -1,0 +1,24 @@
+# Conservative BC-250 GPU profiles. Informational only: the toolkit never applies these automatically.
+[[profile]]
+name = "stock"
+frequency_mhz = 1850
+voltage_mv = 930
+classification = "baseline"
+
+[[profile]]
+name = "balanced"
+frequency_mhz = 2000
+voltage_mv = 1000
+classification = "tested-on-reference-system"
+
+[[profile]]
+name = "aggressive"
+frequency_mhz = 2100
+voltage_mv = 1025
+classification = "experimental"
+
+[[profile]]
+name = "maximum-experimental"
+frequency_mhz = 2200
+voltage_mv = 1050
+classification = "experimental"
