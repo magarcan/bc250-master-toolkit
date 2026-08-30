@@ -38,32 +38,26 @@ bc250_kernel_install() {
 }
 bc250_kernel_setup_menu_action() {
   banner; heading 'Kernel Setup'; echo
-  if bc250_kernel_active_ok; then ok "Active kernel: $(uname -r)"; echo; info 'The active kernel already contains the BC-250 marker.'; return 0; fi
+  if bc250_kernel_active_ok; then ok "Active kernel: $(uname -r)"; echo; info 'The active kernel already contains the BC-250 marker.'; read -r -p 'Press Enter to continue...' _; return 0; fi
   warn "Active kernel: $(uname -r)"; echo
   printf '  Recommended kernel : linux-cachyos-bc250\n  Source repository  : %s\n\n' "$BC250_KERNEL_REPO_URL"
-  printf 'This is the stable/default BC-250 kernel published by the project.\nIt includes the BC-250 kernel patches and matching headers.\n\nInstall it now? [Y/n]: '
-  read -r answer; case "$answer" in n|N) info 'Kernel installation skipped.'; return 0;; esac
-  bc250_setup_require_root kernel-install
+  printf 'The recommended BC-250 kernel includes the required BC-250 patches.\nIt also installs matching headers.\n\nInstall it now? [Y/n]: '
+  read -r answer; case "$answer" in n|N) info 'Kernel installation skipped.';; *) bc250_setup_require_root kernel-install;; esac
+  read -r -p 'Press Enter to continue...' _
 }
 bc250_bios_setup_menu_action() {
   banner; heading 'BIOS Recommendation'; echo
-  if bc250_bios_ok; then ok "BIOS P3.00 detected: $(bc250_bios)"; echo; info 'No BIOS action is required from the toolkit.'; return 0; fi
+  if bc250_bios_ok; then ok "BIOS P3.00 detected: $(bc250_bios)"; echo; info 'No BIOS action is required from the toolkit.'; read -r -p 'Press Enter to continue...' _; return 0; fi
   warn "Detected BIOS: $(bc250_bios)"; echo
-  printf 'Recommended BIOS: P3.00 community BC-250 firmware\nIt provides the 8-core unlock and patched SMU telemetry path.\n\n'
-  printf 'The toolkit will NOT flash your BIOS. You must perform the firmware\ninstallation yourself using the project instructions.\n\nFirmware project:\n  %s\n\nLatest release:\n  %s\n\n' "$BC250_BIOS_URL" "$BC250_BIOS_RELEASE_URL"
+  printf 'Recommended BIOS: P3.00 community BC-250 firmware\n'
+  printf 'It provides the 8-core unlock and patched SMU telemetry path.\n\n'
+  printf 'The toolkit will NOT flash your BIOS. You install it yourself\nusing the firmware project instructions.\n\nFirmware project:\n  %s\n\nLatest release:\n  %s\n\n' "$BC250_BIOS_URL" "$BC250_BIOS_RELEASE_URL"
   printf 'Open the firmware project in your browser? [Y/n]: '; read -r answer
-  case "$answer" in n|N) info 'Browser launch skipped.'; return 0;; esac
-  if command -v xdg-open >/dev/null 2>&1; then
-    xdg-open "$BC250_BIOS_URL" >/dev/null 2>&1 &
-    ok 'Firmware project opened in the default browser.'
-  else
-    info "Open this URL manually: $BC250_BIOS_URL"
-  fi
+  case "$answer" in n|N) info 'Browser launch skipped.';; *) if command -v xdg-open >/dev/null 2>&1; then xdg-open "$BC250_BIOS_URL" >/dev/null 2>&1 & ok 'Firmware project opened in the default browser.'; else info "Open this URL manually: $BC250_BIOS_URL"; fi;; esac
+  read -r -p 'Press Enter to continue...' _
 }
 bc250_platform_status_lines() {
   bc250_bios_ok && ok 'BIOS P3.00 — recommended telemetry firmware' || warn "BIOS $(bc250_bios) — recommended P3.00 not detected"
   bc250_kernel_ok && ok "Kernel $(uname -r) — BC-250 kernel active" || warn "Kernel $(uname -r) — BC-250 kernel not active"
   [ "$(bc250_cpu_cores)" -ge 8 ] 2>/dev/null && ok "CPU topology: $(bc250_cpu_cores) cores / $(bc250_cpu_threads) threads" || warn "CPU topology: $(bc250_cpu_cores) cores / $(bc250_cpu_threads) threads"
 }
-[ -r "$ROOT/lib/gpu_status_fix.sh" ] && source "$ROOT/lib/gpu_status_fix.sh"
-[ -r "$ROOT/lib/ui_overrides.sh" ] && source "$ROOT/lib/ui_overrides.sh"
