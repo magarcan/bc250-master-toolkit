@@ -4,10 +4,20 @@ EXTRAS_BACKUP=/etc/bc250-master-toolkit
 bc250_boot_conf() { if [ -f /etc/default/limine ]; then echo /etc/default/limine; elif [ -f /etc/default/grub ]; then echo /etc/default/grub; else return 1; fi; }
 bc250_boot_cmdline_var() { [ -f /etc/default/limine ] && echo 'KERNEL_CMDLINE[default]' || echo GRUB_CMDLINE_LINUX_DEFAULT; }
 bc250_set_cmdline_flag() {
-  local flag="$1" conf var; conf=$(bc250_boot_conf) || return 1; var=$(bc250_boot_cmdline_var)
+  local flag="$1" conf; conf=$(bc250_boot_conf) || return 1
   mkdir -p "$EXTRAS_BACKUP"; [ -f "$conf.orig" ] || cp -a "$conf" "$conf.orig"
   grep -qF "$flag" "$conf" && return 0
-  sed -i "/^${var}/ s/\"$/ $flag\"/" "$conf"
+  python3 - "$conf" "$flag" <<'PY'
+import sys,re
+p,flag=sys.argv[1:]
+s=open(p).read(); lines=s.splitlines(True)
+for i,line in enumerate(lines):
+    if line.startswith('KERNEL_CMDLINE[default]') or line.startswith('GRUB_CMDLINE_LINUX_DEFAULT'):
+        if line.rstrip().endswith('"'):
+            line=line.rstrip('\n'); line=line[:-1]+' '+flag+'"\n'; lines[i]=line
+        break
+open(p,'w').writelines(lines)
+PY
 }
 bc250_swap_status() { swapon --show --noheadings 2>/dev/null || true; }
 bc250_swap_enable() {
@@ -15,7 +25,7 @@ bc250_swap_enable() {
   if [ ! -f "$EXTRAS_SWAP" ]; then
     if findmnt -n -o FSTYPE / | grep -qx btrfs && command -v btrfs >/dev/null 2>&1; then
       btrfs subvolume create /var/swap 2>/dev/null || true
-      btrfs filesystem mkswapfile --size "$size" "$EXTRAS_SWAP" || true
+      btrfs filesystem mkswapfile --size "$size" "$EXTRAS_SWAP" 2>/dev/null || true
     fi
     if [ ! -f "$EXTRAS_SWAP" ]; then fallocate -l "$size" "$EXTRAS_SWAP"; chmod 600 "$EXTRAS_SWAP"; mkswap "$EXTRAS_SWAP" >/dev/null; fi
   fi
