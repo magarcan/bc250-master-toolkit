@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
-VERSION="1.12.4"
+VERSION="1.13.0"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 for f in "$ROOT"/lib/hardware.sh "$ROOT"/lib/memory.sh "$ROOT"/lib/extras.sh "$ROOT"/lib/cu.sh "$ROOT"/lib/gpu_oc.sh "$ROOT"/lib/setup.sh; do
   [ -r "$f" ] && source "$f"
@@ -52,15 +52,14 @@ show_preflight(){
 
 toolkit_status(){
   banner; heading 'System Status'; echo
-  printf '  BIOS                   %s\n  Kernel                 %s\n  CPU                    %sC / %sT\n  CPU driver             %s\n  CPU governor            %s\n' \
+  printf '  BIOS                   %s\n  Kernel                 %s\n  CPU                    %sC / %sT\n  CPU driver             %s\n  CPU governor           %s\n' \
     "$(bc250_bios)" "$(uname -r)" "$(bc250_cpu_cores)" "$(bc250_cpu_threads)" "$(bc250_cpu_driver)" "$(bc250_cpu_governor)"
   local card h vr; card=$(bc250_gpu_card 2>/dev/null || true)
   if [[ "$card" == card* ]]; then
     h=$(bc250_hwmon "$card" 2>/dev/null || true); vr=$(bc250_gpu_vram "$card")
-    printf '  GPU                    %s\n  GPU SCLK               %s MHz\n  GPU busy               %s%%\n  GPU temp               %s°C\n  VRAM                   %s/%s MB\n  VRAM MCLK              %s MHz\n' \
-      "$card" "$(bc250_gpu_sclk "$h")" "$(bc250_gpu_busy "$card")" "$(bc250_gpu_temp "$h")" "${vr% *}" "${vr#* }" "$(bc250_gpu_mclk "$h")"
+    printf '  GPU                    %s\n  GPU SCLK               %s MHz\n  GPU busy               %s%%\n  GPU temp               %s°C\n  VRAM                   %s/%s MB\n  CPU temp               %s°C\n  VRM temp               %s°C\n\n' \
+      "$card" "$(bc250_gpu_sclk "$h")" "$(bc250_gpu_busy "$card")" "$(bc250_gpu_temp "$h")" "${vr% *}" "${vr#* }" "$(bc250_cpu_temp)" "$(bc250_vrm_temp)"
   fi
-  printf '  CPU temp               %s°C\n  VRM temp               %s°C\n\n' "$(bc250_cpu_temp)" "$(bc250_vrm_temp)"
   bc250_bios_ok && ok 'BIOS: P3.00 recommended firmware' || warn "BIOS: $(bc250_bios) — P3.00 recommended"
   bc250_kernel_ok && ok 'Kernel: BC-250 CachyOS kernel active' || warn "Kernel: $(uname -r) — BC-250 kernel not active"
   bc250_governor_ok && ok 'GPU governor: Cyan-Skillfish SMU ACTIVE' || warn 'GPU governor: inactive'
@@ -68,17 +67,34 @@ toolkit_status(){
 }
 
 gpu_status(){
-  banner; heading 'GPU / Cyan-Skillfish Status'; echo
+  banner; heading 'GPU Control Status'; echo
   systemctl is-active --quiet cyan-skillfish-governor-smu.service && printf 'Service                : active\n' || printf 'Service                : inactive\n'
   local card h vr; card=$(bc250_gpu_card 2>/dev/null || true)
   if [[ "$card" == card* ]]; then
     h=$(bc250_hwmon "$card" 2>/dev/null || true); vr=$(bc250_gpu_vram "$card")
-    printf 'GPU                    : %s\nGPU SCLK               : %s MHz\nGPU busy               : %s%%\nGPU temp               : %s°C\nVRAM                   : %s/%s MB\nVRAM MCLK              : %s MHz\nCPU temp               : %s°C\nVRM temp               : %s°C\n\n' \
-      "$card" "$(bc250_gpu_sclk "$h")" "$(bc250_gpu_busy "$card")" "$(bc250_gpu_temp "$h")" "${vr% *}" "${vr#* }" "$(bc250_gpu_mclk "$h")" "$(bc250_cpu_temp)" "$(bc250_vrm_temp)"
+    printf 'GPU                    : %s\nGPU SCLK               : %s MHz\nGPU busy               : %s%%\nGPU temp               : %s°C\nVRAM                   : %s/%s MB\nVRAM MCLK              : %s MHz\n\n' \
+      "$card" "$(bc250_gpu_sclk "$h")" "$(bc250_gpu_busy "$card")" "$(bc250_gpu_temp "$h")" "${vr% *}" "${vr#* }" "$(bc250_gpu_mclk "$h")"
   else
     warn 'BC-250 GPU not detected.'
   fi
   bc250_gpu_oc_status
+}
+
+memory_report(){
+  banner; heading 'Memory / UMA'; echo
+  local total avail vram_used vram_total
+  read -r total avail vram_used vram_total <<<"$(bc250_memory_status)"
+  printf '  System RAM total       %s MB\n  System RAM available   %s MB\n  VRAM used              %s MB\n  VRAM total             %s MB\n\n' \
+    "${total:-N/A}" "${avail:-N/A}" "${vram_used:-N/A}" "${vram_total:-N/A}"
+  heading 'Recommended UMA splits'; echo
+  bc250_memory_recommendations
+  printf '\n'
+  info 'UMA/VRAM allocation is configured in firmware; this screen is informational only.'
+}
+
+extras_report(){
+  banner; heading 'System Extras Status'; echo
+  bc250_extras_status
 }
 
 apply_gpu_profile(){
@@ -110,25 +126,23 @@ reset_gpu(){
 platform_menu(){
   while true; do
     banner; heading 'Platform Setup'; echo
-    printf '[ 1]  BIOS                Check recommended P3.00 firmware\n[ 2]  CachyOS Kernel       Install/activate linux-cachyos-bc250\n[ 3]  GPU Governor         Verify Cyan-Skillfish SMU governor\n[ 4]  CU / WGP             Install/update CU/WGP manager\n[ 5]  Preflight            Re-run complete validation\n[ 0]  Back\n\nEnter selection: '
+    printf '[ 1]  BIOS                Check recommended P3.00 firmware\n[ 2]  CachyOS Kernel       Install/activate linux-cachyos-bc250\n[ 3]  GPU Governor         Verify Cyan-Skillfish SMU governor\n[ 4]  CU / WGP             Install/update CU/WGP manager\n[ 0]  Back\n\nEnter selection: '
     read -r s
     case "${s,,}" in
       1) bc250_bios_setup_menu_action; pause_screen;;
       2) bc250_kernel_setup_menu_action; pause_screen;;
       3) gpu_status; pause_screen;;
       4) run_privileged "$ROOT/bc250-master-toolkit" cu install; pause_screen;;
-      5) show_preflight; pause_screen;;
       0) return;;
     esac
   done
 }
 
-performance_menu(){
+gpu_performance_menu(){
   while true; do
-    banner; heading 'Performance Lab'; echo
-    printf 'Performance changes are explicit and validation-first. CPU OC remains\nin the research phase; GPU OC/UV is available through Cyan-Skillfish.\n\n'
+    banner; heading 'Performance Lab — GPU'; echo
     bc250_gpu_oc_status; echo
-    heading 'GPU Profiles'; printf '──────────────────────────────────────────────────────────────\n[ 1]  Stock                1850 MHz @ 930 mV\n[ 2]  Balanced             2000 MHz @ 1000 mV\n[ 3]  Aggressive            2100 MHz @ 1025 mV   [EXPERIMENTAL]\n[ 4]  Maximum Experimental  2200 MHz @ 1050 mV   [EXPERIMENTAL]\n[ C]  Custom                Enter MHz / mV / minimum MHz\n[ R]  Reset                 Restore previous GPU configuration\n[ 0]  Back\n\nEnter selection: '
+    heading 'GPU Profiles'; printf '──────────────────────────────────────────────────────────────\n[ 1]  Stock                 1850 MHz @ 930 mV\n[ 2]  Balanced              2000 MHz @ 1000 mV\n[ 3]  Aggressive            2100 MHz @ 1025 mV   [EXPERIMENTAL]\n[ 4]  Maximum Experimental  2200 MHz @ 1050 mV   [EXPERIMENTAL]\n[ C]  Custom                Enter MHz / mV / minimum MHz\n[ R]  Reset                 Restore previous GPU configuration\n[ 0]  Back\n\nEnter selection: '
     read -r s
     case "${s,,}" in
       1) apply_gpu_profile stock; pause_screen;;
@@ -146,17 +160,30 @@ performance_menu(){
   done
 }
 
+performance_menu(){
+  while true; do
+    banner; heading 'Performance Lab'; echo
+    printf 'CPU and GPU tuning live under one Performance Lab. Each device has\nits own validated controls so the two paths can evolve independently.\n\n'
+    printf '[ 1]  GPU Performance      Profiles, OC/UV and governor range\n[ 2]  CPU Performance      Reserved for validated CPU tuning\n[ 0]  Back\n\nEnter selection: '
+    read -r s
+    case "${s,,}" in
+      1) gpu_performance_menu;;
+      2) banner; heading 'Performance Lab — CPU'; echo; info 'CPU tuning is still in the validation/research phase. No settings are changed here yet.'; pause_screen;;
+      0) return;;
+    esac
+  done
+}
+
 hardware_menu(){
   while true; do
     banner; heading 'Hardware & Telemetry'; echo
-    printf '[ 1]  Live Status          CPU / GPU / VRM / VRAM telemetry\n[ 2]  GPU Status           Cyan-Skillfish and GPU telemetry\n[ 3]  Memory / UMA         Current RAM/VRAM split and recommendations\n[ 4]  CU / WGP             Compute-unit state and diagnostics\n[ 5]  CPU Diagnostics      CPU topology, driver and governor\n[ 0]  Back\n\nEnter selection: '
+    printf 'Focused hardware views. The global [S] Status screen already provides\nthe general CPU/GPU/temperature snapshot.\n\n'
+    printf '[ 1]  GPU Control Status   Cyan-Skillfish / DPM / OC-UV state\n[ 2]  Memory / UMA         RAM/VRAM split and recommendations\n[ 3]  CU / WGP             Compute-unit state and diagnostics\n[ 0]  Back\n\nEnter selection: '
     read -r s
     case "${s,,}" in
-      1) toolkit_status; pause_screen;;
-      2) gpu_status; pause_screen;;
-      3) banner; memory; pause_screen;;
-      4) run_privileged "$ROOT/bc250-master-toolkit" cu status; pause_screen;;
-      5) banner; heading 'CPU Diagnostics'; printf '\n  Cores                  %s\n  Threads                %s\n  Driver                 %s\n  Governor               %s\n  Current frequency      %s MHz\n  CPU temperature        %s°C\n  VRM temperature        %s°C\n' "$(bc250_cpu_cores)" "$(bc250_cpu_threads)" "$(bc250_cpu_driver)" "$(bc250_cpu_governor)" "$(bc250_cpu_freq)" "$(bc250_cpu_temp)" "$(bc250_vrm_temp)"; pause_screen;;
+      1) gpu_status; pause_screen;;
+      2) memory_report; pause_screen;;
+      3) run_privileged "$ROOT/bc250-master-toolkit" cu status; pause_screen;;
       0) return;;
     esac
   done
@@ -165,7 +192,7 @@ hardware_menu(){
 extras_menu(){
   while true; do
     banner; heading 'System Extras'; echo
-    printf '[ 1]  Enable Swap          Configure swap\n[ 2]  ZRAM -> ZSWAP        Enable ZSWAP and disable systemd zram\n[ 3]  Hide RDSEED Warning  Set boot loglevel=0\n[ 4]  Disable Mitigations  Add mitigations=off to Limine\n[ 5]  CU / WGP + UMR       Compute-unit tools and diagnostics\n[ 6]  Status                Show current extras state\n[ 0]  Back\n\nEnter selection: '
+    printf '[ 1]  Enable Swap          Configure swap\n[ 2]  ZRAM -> ZSWAP        Enable ZSWAP and disable systemd zram\n[ 3]  Hide RDSEED Warning  Set boot loglevel=0\n[ 4]  Disable Mitigations  Add mitigations=off to Limine\n[ 5]  CU / WGP + UMR       Compute-unit tools and diagnostics\n[ 6]  Extras Status        Current swap / ZSWAP / ZRAM / boot state\n[ 0]  Back\n\nEnter selection: '
     read -r s
     case "${s,,}" in
       1) run_privileged "$ROOT/bc250-master-toolkit" extras swap enable 16G; pause_screen;;
@@ -173,7 +200,7 @@ extras_menu(){
       3) run_privileged "$ROOT/bc250-master-toolkit" extras rdseed hide; pause_screen;;
       4) run_privileged "$ROOT/bc250-master-toolkit" extras mitigations off; pause_screen;;
       5) run_privileged "$ROOT/bc250-master-toolkit" cu status; pause_screen;;
-      6) run_privileged "$ROOT/bc250-master-toolkit" extras status; pause_screen;;
+      6) extras_report; pause_screen;;
       0) return;;
     esac
   done
@@ -182,7 +209,7 @@ extras_menu(){
 recovery_menu(){
   while true; do
     banner; heading 'Recovery & Revert'; echo
-    printf '[ 1]  Reset GPU OC/UV      Restore saved GPU configuration\n[ 2]  Restore boot config  Restore toolkit backup when available\n[ 3]  Show current status   Diagnose before reverting\n[ 0]  Back\n\nEnter selection: '
+    printf '[ 1]  Reset GPU OC/UV      Restore saved GPU configuration\n[ 2]  Restore boot config  Restore toolkit backup when available\n[ 3]  System Status         Diagnose before reverting\n[ 0]  Back\n\nEnter selection: '
     read -r s
     case "${s,,}" in
       1) reset_gpu; pause_screen;;
@@ -199,7 +226,7 @@ main_menu(){
     heading 'Validation'; echo '──────────────────────────────────────────────────────────────'
     printf '[ P]  Preflight             Full read-only platform validation\n\n'
     heading 'Platform'; echo '──────────────────────────────────────────────────────────────'
-    printf '[ 1]  Platform Setup        BIOS / kernel / governor / CU-WGP\n[ 2]  Performance Lab       GPU profiles and manual OC/UV\n[ 3]  Hardware & Telemetry  Live measurements and diagnostics\n[ 4]  System Extras         Swap / ZSWAP / RDSEED / mitigations\n[ 5]  Recovery & Revert     Undo supported changes\n\n'
+    printf '[ 1]  Platform Setup        BIOS / kernel / governor / CU-WGP\n[ 2]  Performance Lab       CPU & GPU performance tuning\n[ 3]  Hardware & Telemetry  Focused hardware diagnostics\n[ 4]  System Extras         Swap / ZSWAP / RDSEED / mitigations\n[ 5]  Recovery & Revert     Undo supported changes\n\n'
     heading 'System'; echo '──────────────────────────────────────────────────────────────'
     printf '[ S]  Status                Current system summary\n[ U]  Update Toolkit        Update from GitHub checkout\n[ 0]  Exit\n\nEnter selection: '
     read -r s
@@ -253,18 +280,18 @@ case "${1:-menu}" in
       *) die 'Unknown GPU command.'; exit 1;;
     esac;;
   cpu) banner; printf 'CPU: %sC / %sT\nDriver: %s\nGovernor: %s\nFrequency: %s MHz\n' "$(bc250_cpu_cores)" "$(bc250_cpu_threads)" "$(bc250_cpu_driver)" "$(bc250_cpu_governor)" "$(bc250_cpu_freq)";;
-  memory) memory;;
+  memory) memory_report;;
   extras)
     case "${2:-status}" in
-      status) extras_status_cmd;;
+      status) bc250_extras_status;;
       swap)
-        if [ "${BC250_PRIVILEGED:-0}" = 1 ] || [ "$EUID" -eq 0 ]; then extras_swap_enable "${4:-16G}"; else run_privileged "$ROOT/bc250-master-toolkit" extras swap enable "${4:-16G}"; fi;;
+        if [ "${BC250_PRIVILEGED:-0}" = 1 ] || [ "$EUID" -eq 0 ]; then bc250_swap_enable "${4:-16G}"; else run_privileged "$ROOT/bc250-master-toolkit" extras swap enable "${4:-16G}"; fi;;
       zswap)
-        if [ "${BC250_PRIVILEGED:-0}" = 1 ] || [ "$EUID" -eq 0 ]; then extras_zswap_enable; else run_privileged "$ROOT/bc250-master-toolkit" extras zswap enable; fi;;
+        if [ "${BC250_PRIVILEGED:-0}" = 1 ] || [ "$EUID" -eq 0 ]; then bc250_zswap_enable; else run_privileged "$ROOT/bc250-master-toolkit" extras zswap enable; fi;;
       rdseed)
-        if [ "${BC250_PRIVILEGED:-0}" = 1 ] || [ "$EUID" -eq 0 ]; then extras_rdseed_hide; else run_privileged "$ROOT/bc250-master-toolkit" extras rdseed hide; fi;;
+        if [ "${BC250_PRIVILEGED:-0}" = 1 ] || [ "$EUID" -eq 0 ]; then bc250_rdseed_hide; else run_privileged "$ROOT/bc250-master-toolkit" extras rdseed hide; fi;;
       mitigations)
-        if [ "${BC250_PRIVILEGED:-0}" = 1 ] || [ "$EUID" -eq 0 ]; then extras_mitigations_off; else run_privileged "$ROOT/bc250-master-toolkit" extras mitigations off; fi;;
+        if [ "${BC250_PRIVILEGED:-0}" = 1 ] || [ "$EUID" -eq 0 ]; then bc250_set_cmdline_flag mitigations=off && bc250_update_boot; else run_privileged "$ROOT/bc250-master-toolkit" extras mitigations off; fi;;
       *) die 'Unknown extras command.'; exit 1;;
     esac;;
   cu)
