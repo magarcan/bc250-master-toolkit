@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
-VERSION="1.12.3"
+VERSION="1.12.4"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 for f in "$ROOT"/lib/hardware.sh "$ROOT"/lib/memory.sh "$ROOT"/lib/extras.sh "$ROOT"/lib/cu.sh "$ROOT"/lib/gpu_oc.sh "$ROOT"/lib/setup.sh; do
   [ -r "$f" ] && source "$f"
@@ -20,15 +20,11 @@ center_line(){ local t="$1" w=64 n l r; n=${#t}; l=$(((w-n)/2)); r=$((w-n-l)); p
 banner(){ printf '\n╔══════════════════════════════════════════════════════════════════╗\n'; center_line 'CachyOS BC250 Master Toolkit'; center_line 'Platform • Performance • Diagnostics'; center_line "v${VERSION}"; printf '╚══════════════════════════════════════════════════════════════════╝\n'; }
 pause_screen(){ printf '\n'; read -r -p 'Press Enter to continue...' _; }
 
-# Elevate only the requested operation. Never replace the interactive menu process.
 run_privileged(){
-  if [ "$EUID" -eq 0 ]; then
-    "$@"
-    return $?
-  fi
+  if [ "$EUID" -eq 0 ]; then "$@"; return $?; fi
   command -v sudo >/dev/null 2>&1 || { die 'sudo is required for this operation.'; return 1; }
   sudo -v || { die 'Authorization was cancelled.'; return 1; }
-  sudo -- "$@"
+  sudo env BC250_PRIVILEGED=1 "$@"
 }
 
 show_preflight(){
@@ -234,9 +230,24 @@ case "${1:-menu}" in
         case "${3:-profiles}" in
           profiles) bc250_gpu_oc_profiles;;
           status) bc250_gpu_oc_status;;
-          apply) run_privileged "$ROOT/bc250-master-toolkit" gpu oc apply "${4:-}";;
-          manual) run_privileged "$ROOT/bc250-master-toolkit" gpu oc manual "${4:-}" "${5:-}" "${6:-600}";;
-          reset) run_privileged "$ROOT/bc250-master-toolkit" gpu oc reset;;
+          apply)
+            if [ "${BC250_PRIVILEGED:-0}" = 1 ] || [ "$EUID" -eq 0 ]; then
+              bc250_gpu_oc_apply "${4:-}"
+            else
+              run_privileged "$ROOT/bc250-master-toolkit" gpu oc apply "${4:-}"
+            fi;;
+          manual)
+            if [ "${BC250_PRIVILEGED:-0}" = 1 ] || [ "$EUID" -eq 0 ]; then
+              bc250_gpu_oc_manual "${4:-}" "${5:-}" "${6:-600}"
+            else
+              run_privileged "$ROOT/bc250-master-toolkit" gpu oc manual "${4:-}" "${5:-}" "${6:-600}"
+            fi;;
+          reset)
+            if [ "${BC250_PRIVILEGED:-0}" = 1 ] || [ "$EUID" -eq 0 ]; then
+              bc250_gpu_oc_reset
+            else
+              run_privileged "$ROOT/bc250-master-toolkit" gpu oc reset
+            fi;;
           *) die 'Unknown GPU OC command.'; exit 1;;
         esac;;
       *) die 'Unknown GPU command.'; exit 1;;
@@ -246,13 +257,26 @@ case "${1:-menu}" in
   extras)
     case "${2:-status}" in
       status) extras_status_cmd;;
-      swap) run_privileged "$ROOT/bc250-master-toolkit" extras swap enable "${4:-16G}";;
-      zswap) run_privileged "$ROOT/bc250-master-toolkit" extras zswap enable;;
-      rdseed) run_privileged "$ROOT/bc250-master-toolkit" extras rdseed hide;;
-      mitigations) run_privileged "$ROOT/bc250-master-toolkit" extras mitigations off;;
+      swap)
+        if [ "${BC250_PRIVILEGED:-0}" = 1 ] || [ "$EUID" -eq 0 ]; then extras_swap_enable "${4:-16G}"; else run_privileged "$ROOT/bc250-master-toolkit" extras swap enable "${4:-16G}"; fi;;
+      zswap)
+        if [ "${BC250_PRIVILEGED:-0}" = 1 ] || [ "$EUID" -eq 0 ]; then extras_zswap_enable; else run_privileged "$ROOT/bc250-master-toolkit" extras zswap enable; fi;;
+      rdseed)
+        if [ "${BC250_PRIVILEGED:-0}" = 1 ] || [ "$EUID" -eq 0 ]; then extras_rdseed_hide; else run_privileged "$ROOT/bc250-master-toolkit" extras rdseed hide; fi;;
+      mitigations)
+        if [ "${BC250_PRIVILEGED:-0}" = 1 ] || [ "$EUID" -eq 0 ]; then extras_mitigations_off; else run_privileged "$ROOT/bc250-master-toolkit" extras mitigations off; fi;;
       *) die 'Unknown extras command.'; exit 1;;
     esac;;
-  cu) run_privileged "$ROOT/bc250-master-toolkit" cu "${2:-status}" "${3:-}";;
+  cu)
+    if [ "${BC250_PRIVILEGED:-0}" = 1 ] || [ "$EUID" -eq 0 ]; then
+      case "${2:-status}" in
+        status) bc250_cu_status;;
+        install) bc250_cu_install;;
+        *) die 'Unknown CU command.'; exit 1;;
+      esac
+    else
+      run_privileged "$ROOT/bc250-master-toolkit" cu "${2:-status}" "${3:-}"
+    fi;;
   help|-h|--help) usage;;
   *) usage; exit 1;;
 esac
