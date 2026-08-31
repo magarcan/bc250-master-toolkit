@@ -17,14 +17,10 @@ try:
     import tomllib
 except ImportError:
     raise SystemExit(1)
-
 try:
     data = tomllib.loads(sys.argv[1])
 except Exception:
     raise SystemExit(1)
-
-# Cyan-Skillfish SMU has existed with several config schemas. Prefer the
-# explicit governor envelope, then fall back to the voltage/frequency curve.
 for section_name in ("frequency-range", "frequency_range", "frequency"):
     section = data.get(section_name)
     if isinstance(section, dict):
@@ -33,7 +29,6 @@ for section_name in ("frequency-range", "frequency_range", "frequency"):
         if isinstance(mn, (int, float)) and isinstance(mx, (int, float)):
             print(f"{int(mn)}|{int(mx)}")
             raise SystemExit(0)
-
 for min_key, max_key in (("min_frequency", "max_frequency"),
                          ("min_frequency_mhz", "max_frequency_mhz"),
                          ("frequency_min", "frequency_max")):
@@ -42,9 +37,6 @@ for min_key, max_key in (("min_frequency", "max_frequency"),
     if isinstance(mn, (int, float)) and isinstance(mx, (int, float)):
         print(f"{int(mn)}|{int(mx)}")
         raise SystemExit(0)
-
-# safe-points / safe_points define the actual frequency curve when no
-# explicit min/max envelope exists. The envelope is the lowest/highest point.
 for key in ("safe-points", "safe_points"):
     points = data.get(key)
     if isinstance(points, list):
@@ -61,7 +53,6 @@ for key in ("safe-points", "safe_points"):
         if freqs:
             print(f"{min(freqs)}|{max(freqs)}")
             raise SystemExit(0)
-
 raise SystemExit(1)
 PY
 }
@@ -82,24 +73,23 @@ bc250_gpu_oc_publish_state() {
 bc250_gpu_oc_range_from_public() {
   local m x
   [ -r "$GPU_OC_PUBLIC_STATE" ] || return 1
-  m=$(sed -n 's/^GPU_OC_MIN_MHZ=//p' "$GPU_OC_PUBLIC_STATE")
-  x=$(sed -n 's/^GPU_OC_MAX_MHZ=//p' "$GPU_OC_PUBLIC_STATE")
-  [ -n "$m" ] && [ -n "$x" ] && printf '%s|%s\n' "$m" "$x"
+  m=$(sed -n 's/^GPU_OC_MIN_MHZ=[[:space:]]*//p' "$GPU_OC_PUBLIC_STATE" | head -n1)
+  x=$(sed -n 's/^GPU_OC_MAX_MHZ=[[:space:]]*//p' "$GPU_OC_PUBLIC_STATE" | head -n1)
+  [[ "$m" =~ ^[0-9]+$ && "$x" =~ ^[0-9]+$ && "$m" -le "$x" ]] || return 1
+  printf '%s|%s\n' "$m" "$x"
 }
 
 bc250_gpu_oc_status() {
   local range min max profile freq volt dpm card
   profile=$(bc250_gpu_oc_active_profile)
   range=$(bc250_gpu_oc_range_from_public 2>/dev/null || true)
-  # A privileged status invocation can read the real Cyan-Skillfish config.
-  # This also repairs the public state for users running the toolkit normally.
   if [ -z "$range" ]; then
     range=$(bc250_gpu_oc_range 2>/dev/null || true)
     if [ -n "$range" ] && [ "$EUID" -eq 0 ]; then
       min=${range%%|*}; max=${range#*|}
       if [ -r "$GPU_OC_PUBLIC_STATE" ]; then
-        freq=$(sed -n 's/^GPU_OC_MAX_MHZ=//p' "$GPU_OC_PUBLIC_STATE")
-        volt=$(sed -n 's/^GPU_OC_VOLTAGE_MV=//p' "$GPU_OC_PUBLIC_STATE")
+        freq=$(sed -n 's/^GPU_OC_MAX_MHZ=//p' "$GPU_OC_PUBLIC_STATE" | head -n1)
+        volt=$(sed -n 's/^GPU_OC_VOLTAGE_MV=//p' "$GPU_OC_PUBLIC_STATE" | head -n1)
       else
         freq="$(bc250_gpu_oc_profile_value "$profile" frequency_mhz 2>/dev/null || true)"
         volt="$(bc250_gpu_oc_profile_value "$profile" voltage_mv 2>/dev/null || true)"
@@ -109,8 +99,8 @@ bc250_gpu_oc_status() {
     fi
   fi
   if [ -r "$GPU_OC_PUBLIC_STATE" ]; then
-    freq=$(sed -n 's/^GPU_OC_MAX_MHZ=//p' "$GPU_OC_PUBLIC_STATE")
-    volt=$(sed -n 's/^GPU_OC_VOLTAGE_MV=//p' "$GPU_OC_PUBLIC_STATE")
+    freq=$(sed -n 's/^GPU_OC_MAX_MHZ=//p' "$GPU_OC_PUBLIC_STATE" | head -n1)
+    volt=$(sed -n 's/^GPU_OC_VOLTAGE_MV=//p' "$GPU_OC_PUBLIC_STATE" | head -n1)
   elif [[ "$profile" =~ ^manual-([0-9]+)mhz-([0-9]+)mv$ ]]; then
     freq="${BASH_REMATCH[1]}"; volt="${BASH_REMATCH[2]}"
   else
