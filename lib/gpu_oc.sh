@@ -165,7 +165,7 @@ PY
 }
 
 bc250_gpu_oc_apply_values() {
-  need_root
+  [ "$EUID" -eq 0 ] || die 'GPU OC/UV application requires root privileges.'
   local name="$1" f="$2" v="$3" m="${4:-}" r
   [ -f "$GPU_OC_CONFIG" ] || die "Cyan-Skillfish configuration not found: $GPU_OC_CONFIG"
   r=$(bc250_gpu_oc_range 2>/dev/null || true)
@@ -173,7 +173,7 @@ bc250_gpu_oc_apply_values() {
   [ -z "$m" ] && m=300
   bc250_gpu_oc_validate "$f" "$v" "$m"
   bc250_gpu_oc_write "$f" "$v" "$m"
-  printf '%s\n' "$name" > "$GPU_OC_STATE"
+  printf '%s\n' "$name" > "$GPU_OC_STATE" || die 'Could not save active GPU profile.'
   bc250_gpu_oc_publish_state "$f" "$v" "$m" || die 'Could not publish read-only GPU OC state.'
   systemctl restart "$CYAN_SERVICE" 2>/dev/null || die 'Cyan-Skillfish governor failed to restart.'
   systemctl is-active --quiet "$CYAN_SERVICE" || die 'Cyan-Skillfish governor is not active after profile application.'
@@ -199,7 +199,7 @@ bc250_gpu_oc_manual() {
 }
 
 bc250_gpu_oc_reset() {
-  need_root
+  [ "$EUID" -eq 0 ] || die 'GPU OC/UV reset requires root privileges.'
   [ -f "$GPU_OC_BACKUP" ] || die 'No saved pre-profile configuration exists; nothing to reset.'
   cp -a "$GPU_OC_BACKUP" "$GPU_OC_CONFIG" || die 'Could not restore the saved Cyan-Skillfish configuration.'
   rm -f "$GPU_OC_STATE" "$GPU_OC_PUBLIC_STATE"
