@@ -1,9 +1,16 @@
-# Conservative BC-250 GPU profiles. Not applied automatically; the user explicitly selects one.
+# BC-250 GPU profiles.
+# Minimum frequency uses the extended 350–2230 MHz DPM envelope exposed by the
+# BC-250 CachyOS kernel. 600 MHz is the toolkit's conservative governor floor:
+# low enough for idle/power savings, while avoiding the absolute 350 MHz floor.
+#
+# Only the Balanced profile has been validated on the reference system so far.
+# Higher profiles remain explicit experimental starting points and must be
+# validated per board/silicon/cooling.
 [[profile]]
 name = "stock"
 frequency_mhz = 1850
 voltage_mv = 930
-min_frequency_mhz = 1000
+min_frequency_mhz = 600
 classification = "baseline"
 
 [[profile]]
