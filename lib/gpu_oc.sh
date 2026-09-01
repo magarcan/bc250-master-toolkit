@@ -9,7 +9,7 @@ CYAN_SERVICE="${CYAN_SERVICE:-cyan-skillfish-governor-smu.service}"
 
 bc250_gpu_oc_read_config() { [ -r "$GPU_OC_CONFIG" ] && cat "$GPU_OC_CONFIG"; }
 
-bc250_gpu_oc_range() {
+bc250_gpu_oc_parse_config() {
   local content
   content=$(bc250_gpu_oc_read_config 2>/dev/null) || return 1
   python3 - "$content" <<'PY'
@@ -21,44 +21,38 @@ except Exception:
     raise SystemExit(1)
 points=data.get('safe-points') or data.get('safe_points')
 if isinstance(points,list):
-    freqs=[int(p.get('frequency')) for p in points if isinstance(p,dict) and isinstance(p.get('frequency'),(int,float))]
-    if freqs:
-        print(f'{min(freqs)}|{max(freqs)}'); raise SystemExit(0)
-for section_name in ('frequency-range','frequency_range','frequency'):
-    section=data.get(section_name)
-    if isinstance(section,dict):
-        mn,mx=section.get('min'),section.get('max')
-        if isinstance(mn,(int,float)) and isinstance(mx,(int,float)):
-            print(f'{int(mn)}|{int(mx)}'); raise SystemExit(0)
-for min_key,max_key in (('min_frequency','max_frequency'),('min_frequency_mhz','max_frequency_mhz'),('frequency_min','frequency_max')):
-    mn,mx=data.get(min_key),data.get(max_key)
-    if isinstance(mn,(int,float)) and isinstance(mx,(int,float)):
-        print(f'{int(mn)}|{int(mx)}'); raise SystemExit(0)
+    out=[]
+    for p in points:
+        if isinstance(p,dict):
+            f=p.get('frequency',p.get('freq_mhz'))
+            v=p.get('voltage',p.get('voltage_mv'))
+            if isinstance(f,(int,float)) and isinstance(v,(int,float)):
+                out.append((int(f),int(v)))
+    if out:
+        out.sort()
+        print(','.join(f'{f}:{v}' for f,v in out))
+        raise SystemExit(0)
 raise SystemExit(1)
 PY
 }
 
-bc250_gpu_oc_config_points() {
-  local content
-  content=$(bc250_gpu_oc_read_config 2>/dev/null) || return 1
-  python3 - "$content" <<'PY'
+bc250_gpu_oc_range() {
+  local curve
+  curve=$(bc250_gpu_oc_parse_config 2>/dev/null) || return 1
+  python3 - "$curve" <<'PY'
 import sys
-try:
-    import tomllib
-    data=tomllib.loads(sys.argv[1])
-except Exception:
-    raise SystemExit(1)
-points=data.get('safe-points') or data.get('safe_points')
-if not isinstance(points,list): raise SystemExit(1)
-out=[]
-for p in points:
-    if isinstance(p,dict) and isinstance(p.get('frequency'),(int,float)) and isinstance(p.get('voltage'),(int,float)):
-        out.append((int(p['frequency']),int(p['voltage'])))
-if not out: raise SystemExit(1)
-out.sort()
-print(','.join(f'{f}:{v}' for f,v in out))
+pts=[]
+for item in sys.argv[1].split(','):
+    f,_=item.split(':',1)
+    pts.append(int(f))
+if pts:
+    print(f'{min(pts)}|{max(pts)}')
+    raise SystemExit(0)
+raise SystemExit(1)
 PY
 }
+
+bc250_gpu_oc_config_points() { bc250_gpu_oc_parse_config; }
 
 bc250_gpu_oc_profile_file() { case "$1" in stock|balanced|aggressive|maximum-experimental) printf '%s\n' "$ROOT/profiles/gpu.toml";; *) printf '%s\n' "$ROOT/profiles/gpu-personal.toml";; esac; }
 
@@ -105,21 +99,21 @@ bc250_gpu_oc_publish_state() {
   mkdir -p "$GPU_OC_STATE_DIR" || return 1
   p=$(bc250_gpu_oc_active_profile)
   umask 022
-  printf 'GPU_OC_PROFILE=%q\nGPU_OC_CURVE=%q\n' "$p" "$curve" > "$GPU_OC_PUBLIC_STATE" || return 1
+  printf 'GPU_OC_PROFILE=%s\nGPU_OC_CURVE=%s\n' "$p" "$curve" > "$GPU_OC_PUBLIC_STATE" || return 1
   chmod 0644 "$GPU_OC_PUBLIC_STATE" "$GPU_OC_STATE" 2>/dev/null || true
 }
 
 bc250_gpu_oc_curve_from_public() {
   [ -r "$GPU_OC_PUBLIC_STATE" ] || return 1
-  sed -n 's/^GPU_OC_CURVE=//p' "$GPU_OC_PUBLIC_STATE" | head -n1 | sed "s/^'//;s/'$//"
+  sed -n 's/^GPU_OC_CURVE=//p' "$GPU_OC_PUBLIC_STATE" | head -n1
 }
 
 bc250_gpu_oc_status() {
   local range min max profile curve card dpm
   profile=$(bc250_gpu_oc_active_profile)
+  range=$(bc250_gpu_oc_range 2>/dev/null || true)
   curve=$(bc250_gpu_oc_curve_from_public 2>/dev/null || true)
   [ -n "$curve" ] || curve=$(bc250_gpu_oc_config_points 2>/dev/null || true)
-  range=$(bc250_gpu_oc_range 2>/dev/null || true)
   if [ -z "$range" ]; then
     printf 'GPU OC/UV control\n  Active profile        : %s\n' "$profile"
     [ -n "$curve" ] && printf '  Safe-points           : %s\n' "$curve"
@@ -175,8 +169,10 @@ bc250_gpu_oc_write() {
 import re,sys
 src,dst,curve=sys.argv[1:]
 s=open(src,encoding='utf-8').read()
-s=re.sub(r'^\[frequency-range\][\s\S]*?(?=^\[|\Z)','',s,flags=re.M)
-s=re.sub(r'^\[\[safe-points\]\][\s\S]*?(?=^\[|\Z)','',s,flags=re.M)
+# Remove all legacy range representations and every existing safe-point form.
+s=re.sub(r'(?m)^\s*\[frequency-range\]\s*\n(?:^[^\[]*\n?)*', '', s)
+s=re.sub(r'(?m)^\s*(?:safe-points|safe_points)\s*=\s*\[[\s\S]*?\]\s*\n?', '', s)
+s=re.sub(r'(?m)^\s*\[\[safe-points\]\]\s*\n(?:^[^\[]*\n?)*', '', s)
 pts=[]
 for item in curve.split(','):
     f,v=item.split(':',1); pts.append((int(f),int(v)))
@@ -185,6 +181,11 @@ for f,v in pts:
     block += f'[[safe-points]]\nfrequency = {f}\nvoltage = {v}\n\n'
 s=s.rstrip()+block
 open(dst,'w',encoding='utf-8').write(s)
+PY
+  # Validate the generated TOML before replacing the live configuration.
+  python3 - "$tmp" <<'PY' || { rm -f "$tmp"; die 'Generated Cyan-Skillfish configuration is invalid TOML.'; }
+import sys,tomllib
+tomllib.load(open(sys.argv[1],'rb'))
 PY
   mv "$tmp" "$GPU_OC_CONFIG" || die 'Could not update governor configuration.'
 }
