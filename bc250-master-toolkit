@@ -2,12 +2,11 @@
 set -uo pipefail
 VERSION="1.13.1"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-for f in "$ROOT"/lib/hardware.sh "$ROOT"/lib/memory.sh "$ROOT"/lib/extras.sh "$ROOT"/lib/cu.sh "$ROOT"/lib/gpu_oc.sh "$ROOT"/lib/setup.sh "$ROOT"/lib/ui.sh "$ROOT"/lib/ui_refinements.sh; do
+for f in "$ROOT"/lib/hardware.sh "$ROOT"/lib/memory.sh "$ROOT"/lib/extras.sh "$ROOT"/lib/cu.sh "$ROOT"/lib/gpu_oc.sh "$ROOT"/lib/setup.sh "$ROOT"/lib/ui.sh; do
   [ -r "$f" ] && source "$f"
 done
+[ -r "$ROOT/lib/ui_refinements.sh" ] && source "$ROOT/lib/ui_refinements.sh"
 
-# setup.sh uses this internal dispatcher when it needs to cross the sudo
-# boundary. Keep it deliberately small: all interactive UI lives in ui.sh.
 if [ "${1:-}" = "__root" ]; then
   [ "$EUID" -eq 0 ] || { die 'Internal root dispatcher called without root privileges.'; exit 1; }
   shift
