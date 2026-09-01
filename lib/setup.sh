@@ -34,8 +34,7 @@ bc250_kernel_install() {
   info 'Refreshing package databases and installing the stable BC-250 kernel...'
   pacman -Syu --needed linux-cachyos-bc250 linux-cachyos-bc250-headers || die 'BC-250 kernel installation failed.'
   ok 'linux-cachyos-bc250 and headers installed.'
-  echo; warn 'Reboot is required to start the newly installed kernel.'; printf '  Active kernel now : %s\n  Installed kernel  : linux-cachyos-bc250\n' "$(uname -r)"
-}
+  echo; warn 'Reboot is required to start the newly installed kernel.'; printf '  Active kernel now : %s\n  Installed kernel  : linux-cachyos-bc250\n' "$(uname -r)"; }
 bc250_kernel_setup_menu_action() {
   banner; heading 'Kernel Setup'; echo
   if bc250_kernel_active_ok; then ok "Active kernel: $(uname -r)"; echo; info 'The active kernel already contains the BC-250 marker.'; read -r -p 'Press Enter to continue...' _; return 0; fi
@@ -54,6 +53,42 @@ bc250_bios_setup_menu_action() {
   printf 'The toolkit will NOT flash your BIOS. You install it yourself\nusing the firmware project instructions.\n\nFirmware project:\n  %s\n\nLatest release:\n  %s\n\n' "$BC250_BIOS_URL" "$BC250_BIOS_RELEASE_URL"
   printf 'Open the firmware project in your browser? [Y/n]: '; read -r answer
   case "$answer" in n|N) info 'Browser launch skipped.';; *) if command -v xdg-open >/dev/null 2>&1; then xdg-open "$BC250_BIOS_URL" >/dev/null 2>&1 & ok 'Firmware project opened in the default browser.'; else info "Open this URL manually: $BC250_BIOS_URL"; fi;; esac
+  read -r -p 'Press Enter to continue...' _
+}
+bc250_umr_setup_menu_action() {
+  banner; heading 'UMR Setup'; echo
+  if bc250_umr_present; then
+    ok "UMR detected: $(command -v umr)"
+    if command -v umr >/dev/null 2>&1; then
+      printf '  Version             : '; umr --version 2>/dev/null | head -n1 || true
+    fi
+    echo
+    info 'UMR is already available. No download is required.'
+  else
+    warn 'UMR (User Mode Register debugger) is not installed.'
+    echo
+    printf 'UMR is required by the BC-250 CU/WGP tooling for register-level diagnostics.\n'
+    printf 'It is installed from the official upstream source because it is not\navailable through the enabled CachyOS/AUR package path.\n\n'
+    printf 'Upstream source:\n  %s\n\n' "$UMR_SRC"
+    printf 'Download and build UMR now? [Y/n]: '
+    read -r answer
+    case "$answer" in
+      n|N) info 'UMR installation skipped.';;
+      *) bc250_setup_require_root umr-install;;
+    esac
+  fi
+  read -r -p 'Press Enter to continue...' _
+}
+bc250_cu_setup_menu_action() {
+  banner; heading 'CU / WGP Setup'; echo
+  if ! bc250_umr_present; then
+    warn 'UMR is not installed; CU/WGP manager depends on UMR for register access.'
+    echo
+    printf 'Install UMR before continuing? [Y/n]: '; read -r answer
+    case "$answer" in n|N) info 'CU/WGP installation skipped.'; read -r -p 'Press Enter to continue...' _; return 0;; esac
+    bc250_setup_require_root umr-install || { read -r -p 'Press Enter to continue...' _; return 1; }
+  fi
+  bc250_setup_require_root cu-install
   read -r -p 'Press Enter to continue...' _
 }
 bc250_platform_status_lines() {
