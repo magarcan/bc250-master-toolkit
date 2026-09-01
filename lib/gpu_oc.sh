@@ -68,12 +68,10 @@ bc250_gpu_oc_profile_points() {
   [ -r "$file" ] || return 1
   python3 - "$file" "$name" <<'PY'
 import sys,tomllib
-try:
-    data=tomllib.load(open(sys.argv[1],'rb'))
+try: data=tomllib.load(open(sys.argv[1],'rb'))
 except Exception: raise SystemExit(1)
-name=sys.argv[2]
 for p in data.get('profile',[]):
-    if p.get('name')==name:
+    if p.get('name')==sys.argv[2]:
         pts=p.get('safe_points') or p.get('safe-points') or []
         if pts:
             print(','.join(f"{int(x['frequency'])}:{int(x['voltage'])}" for x in pts))
@@ -113,7 +111,7 @@ bc250_gpu_oc_publish_state() {
 
 bc250_gpu_oc_curve_from_public() {
   [ -r "$GPU_OC_PUBLIC_STATE" ] || return 1
-  sed -n 's/^GPU_OC_CURVE=//p' "$GPU_OC_PUBLIC_STATE" | head -n1 | sed 's/^'"'"'//;s/'"'"'$//'
+  sed -n 's/^GPU_OC_CURVE=//p' "$GPU_OC_PUBLIC_STATE" | head -n1 | sed "s/^'//;s/'$//"
 }
 
 bc250_gpu_oc_status() {
@@ -164,7 +162,6 @@ except Exception as e:
 if len(pts)<2: print('At least two safe-points are required.',file=sys.stderr); raise SystemExit(1)
 if len({f for f,v in pts}) != len(pts): print('Safe-point frequencies must be unique.',file=sys.stderr); raise SystemExit(1)
 pts.sort()
-if pts[0][0] >= pts[-1][0]: raise SystemExit(1)
 print(','.join(f'{f}:{v}' for f,v in pts))
 PY
 }
@@ -178,7 +175,6 @@ bc250_gpu_oc_write() {
 import re,sys
 src,dst,curve=sys.argv[1:]
 s=open(src,encoding='utf-8').read()
-# Remove the old two-state frequency envelope and any existing curve.
 s=re.sub(r'^\[frequency-range\][\s\S]*?(?=^\[|\Z)','',s,flags=re.M)
 s=re.sub(r'^\[\[safe-points\]\][\s\S]*?(?=^\[|\Z)','',s,flags=re.M)
 pts=[]
@@ -217,9 +213,24 @@ bc250_gpu_oc_apply() {
 }
 
 bc250_gpu_oc_manual() {
-  local curve="${1:-}"
-  [ -n "$curve" ] || die 'Use: gpu oc manual <freq:mv[,freq:mv,...]>'
-  bc250_gpu_oc_apply_curve "custom" "$curve"
+  local a="${1:-}" b="${2:-}" c="${3:-}" curve
+  if [[ "$a" =~ ^[0-9]+$ && "$b" =~ ^[0-9]+$ && "$c" =~ ^[0-9]+$ ]]; then
+    if (( a <= 1000 )); then
+      curve="${c}:700,${a}:${b}"
+    elif (( a <= 1500 )); then
+      curve="${c}:700,1000:700,${a}:${b}"
+    elif (( a <= 1850 )); then
+      curve="${c}:700,1000:800,1500:900,${a}:${b}"
+    elif (( a <= 2000 )); then
+      curve="${c}:700,1000:800,1500:900,1850:930,${a}:${b}"
+    else
+      curve="${c}:700,1000:800,1500:900,1850:930,2000:1000,${a}:${b}"
+    fi
+    bc250_gpu_oc_apply_curve "custom-${a}mhz-${b}mv" "$curve"
+  else
+    [ -n "$a" ] || die 'Use: gpu oc manual <freq:mv[,freq:mv,...]> or <maxMHz> <mV> [minMHz]'
+    bc250_gpu_oc_apply_curve 'custom' "$a"
+  fi
 }
 
 bc250_gpu_oc_reset() {
