@@ -109,7 +109,11 @@ ui_preflight() {
 ui_gpu_status() {
   ui_banner
   printf 'GPU Status\n\n'
-  systemctl is-active --quiet "$CYAN_SERVICE" 2>/dev/null && printf 'Governor service       : active\n' || printf 'Governor service       : inactive\n'
+  if systemctl is-active --quiet "$CYAN_SERVICE" 2>/dev/null; then
+    ok 'Governor service active'
+  else
+    warn 'Governor service inactive'
+  fi
   local card h vr; card=$(bc250_gpu_card 2>/dev/null || true)
   if [[ "$card" == card* ]]; then
     h=$(bc250_hwmon "$card" 2>/dev/null || true); vr=$(bc250_gpu_vram "$card")
@@ -178,8 +182,8 @@ ui_gpu_profiles() {
     printf '[ 1]  GPU Status            Telemetry + governor + OC/UV state\n'
     printf '[ 2]  Stock                 1850 MHz @ 930 mV\n'
     printf '[ 3]  Balanced              2000 MHz @ 1000 mV\n'
-    printf '[ 4]  Aggressive            2100 MHz @ 1025 mV  [EXPERIMENTAL]\n'
-    printf '[ 5]  Maximum Experimental  2200 MHz @ 1050 mV  [EXPERIMENTAL]\n'
+    warn '[ 4]  Aggressive            2100 MHz @ 1025 mV  [EXPERIMENTAL]'
+    warn '[ 5]  Maximum Experimental  2200 MHz @ 1050 mV  [EXPERIMENTAL]'
     printf '[ C]  Custom                Enter MHz / mV / minimum MHz\n'
     printf '[ R]  Reset                 Restore saved GPU configuration\n'
     printf '[ 0]  Back\n\nEnter selection: '
@@ -247,40 +251,41 @@ ui_hardware() {
     read -r s
     case "${s,,}" in
       1) ui_live_snapshot; ui_pause;;
-      2) ui_banner; printf 'Memory / UMA\n\n'; bc250_memory_status; echo; bc250_memory_recommendations; ui_pause;;
+      2) bc250_memory_status; ui_pause;;
       3) ui_require_root cu status; ui_pause;;
-      4) ui_banner; printf 'CPU Diagnostics\n\n'; printf '  Cores                  %s\n  Threads                %s\n  Driver                 %s\n  Governor               %s\n  Current frequency      %s MHz\n  CPU temperature        %s°C\n  VRM temperature        %s°C\n' "$(bc250_cpu_cores)" "$(bc250_cpu_threads)" "$(bc250_cpu_driver)" "$(bc250_cpu_governor)" "$(bc250_cpu_freq)" "$(bc250_cpu_temp)" "$(bc250_vrm_temp)"; ui_pause;;
+      4) bc250_cpu_status; ui_pause;;
       0) return;;
     esac
   done
 }
 
 ui_extras_status() {
-  ui_banner
-  printf 'System Extras\n\n'
-  heading 'Current state'
-  bc250_extras_status
-  local conf
+  ui_banner; printf 'System Extras\n\n'; heading 'Current state'
+  local zswap zram conf rdseed mitigations swapfile
+  zswap=$(cat /sys/module/zswap/parameters/enabled 2>/dev/null || echo N)
+  zram=$([ -e /dev/zram0 ] && echo present || echo not-exposed)
   conf=$(bc250_boot_conf 2>/dev/null || true)
-  printf '\n  Boot configuration     %s\n' "${conf:-not found}"
-  if [ -n "$conf" ]; then
-    grep -q 'loglevel=0' "$conf" 2>/dev/null && ok 'RDSEED warning hidden' || info 'RDSEED warning: default'
-    grep -q 'mitigations=off' "$conf" 2>/dev/null && warn 'CPU mitigations disabled' || info 'CPU mitigations: default'
-  fi
+  swapfile=$(swapon --show=NAME,TYPE,SIZE --noheadings 2>/dev/null | awk '$2 == "file" {print; exit}')
+  printf '  Swapfile             '; [ -n "$swapfile" ] && ok "Enabled — $swapfile" || warn 'Not configured'
+  printf '  ZRAM                 '; [ "$zram" = present ] && ok 'Active' || info 'Not exposed'
+  printf '  ZSWAP                '; [ "$zswap" = Y ] && ok 'Enabled' || warn 'Disabled'
+  printf '  Boot configuration   %s\n' "${conf:-not found}"
+  rdseed=default; mitigations=default
+  if [ -n "$conf" ]; then grep -q 'loglevel=0' "$conf" 2>/dev/null && rdseed=hidden; grep -q 'mitigations=off' "$conf" 2>/dev/null && mitigations=disabled; fi
+  printf '  RDSEED warning       '; [ "$rdseed" = hidden ] && ok 'Hidden' || info 'Default'
+  printf '  CPU mitigations      '; [ "$mitigations" = disabled ] && warn 'Disabled' || info 'Default'
 }
 
 ui_extras() {
   while true; do
-    ui_extras_status
-    printf '\n'
-    heading 'Available actions'
-    printf '[ 1]  Enable Swap          Configure swap\n'
-    printf '[ 2]  ZRAM → ZSWAP        Enable ZSWAP and disable systemd zram\n'
-    printf '[ 3]  Hide RDSEED Warning  Set boot loglevel=0\n'
-    printf '[ 4]  Disable Mitigations  Add mitigations=off to boot configuration\n'
-    printf '[ 5]  CU / WGP + UMR       Compute-unit tools and diagnostics\n'
-    printf '[ R]  Refresh               Re-check current state\n'
-    printf '[ 0]  Back\n\nEnter selection: '
+    ui_extras_status; printf '\n'; heading 'Available actions'
+    printf '[ 1] Enable Swap          — Persistent swapfile (16G default)\n'
+    printf '[ 2] Enable ZSWAP         — Disable systemd ZRAM and enable compressed swap\n'
+    printf '[ 3] Hide RDSEED Warning  — Set boot loglevel=0\n'
+    printf '[ 4] Disable Mitigations  — Add mitigations=off to boot configuration\n'
+    printf '[ 5] CU / WGP + UMR       — Compute-unit tools and diagnostics\n'
+    printf '[ R] Refresh               — Re-check current state\n'
+    printf '[ 0] Back\n\nEnter selection: '
     read -r s
     case "${s,,}" in
       1) ui_require_root extras swap enable 16G; ui_pause;;
@@ -288,98 +293,7 @@ ui_extras() {
       3) ui_require_root extras rdseed hide; ui_pause;;
       4) ui_require_root extras mitigations off; ui_pause;;
       5) ui_require_root cu status; ui_pause;;
-      r) ;;
-      0) return;;
+      r) ;; 0) return;;
     esac
   done
-}
-
-ui_recovery() {
-  while true; do
-    ui_banner
-    printf 'Recovery & Revert\n\n'
-    printf '[ 1]  Reset GPU OC/UV      Restore saved GPU configuration\n'
-    printf '[ 2]  Restore boot config  Restore toolkit backup when available\n'
-    printf '[ 3]  Show system status   Diagnose before reverting\n'
-    printf '[ 0]  Back\n\nEnter selection: '
-    read -r s
-    case "${s,,}" in
-      1) ui_require_root gpu oc reset; ui_pause;;
-      2) ui_require_root bash -c 'if [ -f /etc/default/limine.orig ]; then cp -a /etc/default/limine.orig /etc/default/limine; command -v limine-update >/dev/null 2>&1 && limine-update || true; echo "Boot configuration restored."; else echo "No boot backup found."; fi'; ui_pause;;
-      3) ui_status; ui_pause;;
-      0) return;;
-    esac
-  done
-}
-
-ui_menu() {
-  while true; do
-    ui_banner
-    printf 'Validation\n──────────────────────────────────────────────────────────────\n'
-    printf '[ P]  Preflight             Validate and help configure missing components\n\n'
-    printf 'Platform\n──────────────────────────────────────────────────────────────\n'
-    printf '[ 1]  Platform Setup        BIOS / kernel / governor / CU-WGP\n'
-    printf '[ 2]  Performance Lab       GPU status, profiles and CPU tuning\n'
-    printf '[ 3]  Hardware & Telemetry  Live measurements and diagnostics\n'
-    printf '[ 4]  System Extras         Status + optional system changes\n'
-    printf '[ 5]  Recovery & Revert     Undo supported changes\n\n'
-    printf 'System\n──────────────────────────────────────────────────────────────\n'
-    printf '[ S]  Status                Current system summary\n'
-    printf '[ U]  Update Toolkit        Update from GitHub checkout\n'
-    printf '[ 0]  Exit\n\nEnter selection: '
-    read -r s
-    case "${s,,}" in
-      p) ui_preflight; ui_pause;;
-      s) ui_status; ui_pause;;
-      1) ui_platform;;
-      2) ui_performance;;
-      3) ui_hardware;;
-      4) ui_extras;;
-      5) ui_recovery;;
-      u) info 'Use git pull in the toolkit checkout to update safely.'; ui_pause;;
-      0) return;;
-    esac
-  done
-}
-
-bc250_ui_main() {
-  case "${1:-menu}" in
-    menu) ui_menu;;
-    preflight) ui_preflight;;
-    status) ui_status;;
-    gpu)
-      case "${2:-status}" in
-        status) ui_gpu_status;;
-        oc)
-          case "${3:-status}" in
-            profiles) printf 'Stock 1850 MHz @ 930 mV\nBalanced 2000 MHz @ 1000 mV\nAggressive 2100 MHz @ 1025 mV\nMaximum Experimental 2200 MHz @ 1050 mV\n';;
-            status) bc250_gpu_oc_status;;
-            apply) ui_require_root gpu oc apply "${4:-}";;
-            manual) ui_require_root gpu oc manual "${4:-}" "${5:-}" "${6:-}";;
-            reset) ui_require_root gpu oc reset;;
-            *) die 'Unknown GPU OC command.'; return 1;;
-          esac;;
-        *) ui_gpu_status;;
-      esac;;
-    cpu) ui_banner; printf 'CPU: %sC / %sT\nDriver: %s\nGovernor: %s\nFrequency: %s MHz\n' "$(bc250_cpu_cores)" "$(bc250_cpu_threads)" "$(bc250_cpu_driver)" "$(bc250_cpu_governor)" "$(bc250_cpu_freq)";;
-    memory) ui_banner; bc250_memory_status; echo; bc250_memory_recommendations;;
-    extras)
-      case "${2:-status}" in
-        status) bc250_extras_status;;
-        swap) [ "${3:-}" = enable ] || die 'Use: extras swap enable [size]'; ui_require_root extras swap enable "${4:-16G}";;
-        zswap) ui_require_root extras zswap enable;;
-        rdseed) ui_require_root extras rdseed hide;;
-        mitigations) [ "${3:-}" = off ] || die 'Use: extras mitigations off'; ui_require_root extras mitigations off;;
-        *) die 'Unknown extras command.'; return 1;;
-      esac;;
-    cu)
-      case "${2:-status}" in
-        install) ui_require_root cu install;;
-        umr) ui_require_root cu umr install;;
-        status) bc250_cu_status;;
-        *) die 'Unknown CU command.'; return 1;;
-      esac;;
-    help|-h|--help) printf 'CachyOS BC250 Master Toolkit v%s\n' "$VERSION";;
-    *) die "Unknown command: $1"; return 1;;
-  esac
 }
