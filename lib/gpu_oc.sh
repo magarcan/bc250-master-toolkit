@@ -36,20 +36,29 @@ raise SystemExit(1)
 PY
 }
 
-bc250_gpu_oc_range() {
-  local curve
-  curve=$(bc250_gpu_oc_parse_config 2>/dev/null) || return 1
+bc250_gpu_oc_range_from_curve() {
+  local curve="$1"
+  [ -n "$curve" ] || return 1
   python3 - "$curve" <<'PY'
 import sys
 pts=[]
-for item in sys.argv[1].split(','):
-    f,_=item.split(':',1)
-    pts.append(int(f))
+try:
+    for item in sys.argv[1].replace('\\,', ',').split(','):
+        f,_=item.strip().split(':',1)
+        pts.append(int(f))
+except Exception:
+    raise SystemExit(1)
 if pts:
     print(f'{min(pts)}|{max(pts)}')
     raise SystemExit(0)
 raise SystemExit(1)
 PY
+}
+
+bc250_gpu_oc_range() {
+  local curve
+  curve=$(bc250_gpu_oc_parse_config 2>/dev/null) || return 1
+  bc250_gpu_oc_range_from_curve "$curve"
 }
 
 bc250_gpu_oc_config_points() { bc250_gpu_oc_parse_config; }
@@ -104,38 +113,57 @@ bc250_gpu_oc_publish_state() {
 }
 
 bc250_gpu_oc_curve_from_public() {
+  local curve
   [ -r "$GPU_OC_PUBLIC_STATE" ] || return 1
-  sed -n 's/^GPU_OC_CURVE=//p' "$GPU_OC_PUBLIC_STATE" | head -n1
+  curve=$(sed -n 's/^GPU_OC_CURVE=//p' "$GPU_OC_PUBLIC_STATE" | head -n1)
+  [ -n "$curve" ] || return 1
+  # Older toolkit revisions published shell-escaped commas (\,). Normalize them
+  # so an existing public state remains readable after upgrading.
+  printf '%s\n' "${curve//\\,/,}"
 }
 
 bc250_gpu_oc_status() {
-  local range min max profile curve card dpm
+  local range min max profile curve card dpm source
   profile=$(bc250_gpu_oc_active_profile)
-  range=$(bc250_gpu_oc_range 2>/dev/null || true)
+
+  # Prefer the public state for unprivileged status. The Cyan-Skillfish config may
+  # intentionally be root-only, while this file contains only the applied curve.
   curve=$(bc250_gpu_oc_curve_from_public 2>/dev/null || true)
-  [ -n "$curve" ] || curve=$(bc250_gpu_oc_config_points 2>/dev/null || true)
-  if [ -z "$range" ]; then
-    printf 'GPU OC/UV control\n  Active profile        : %s\n' "$profile"
-    [ -n "$curve" ] && printf '  Safe-points           : %s\n' "$curve"
-    printf '  Governor range        : Unknown\n  Config                : %s\n' "$GPU_OC_CONFIG"
-    echo
-    warn 'GPU safe-point curve could not be read from the Cyan-Skillfish configuration.'
-    return 0
+  source=public
+  if [ -z "$curve" ]; then
+    curve=$(bc250_gpu_oc_config_points 2>/dev/null || true)
+    source=config
   fi
-  min=${range%%|*}; max=${range#*|}
+
+  range=$(bc250_gpu_oc_range 2>/dev/null || true)
+  [ -n "$range" ] || range=$(bc250_gpu_oc_range_from_curve "$curve" 2>/dev/null || true)
+
   card=$(bc250_gpu_card 2>/dev/null || true)
   dpm=$(bc250_gpu_dpm_range "$card" "$(bc250_card_path "$card")" 2>/dev/null || true)
+
   printf 'GPU OC/UV control\n  Active profile        : %s\n' "$profile"
   if [[ "$dpm" =~ ^[0-9]+[[:space:]]+[0-9]+$ ]]; then
     printf '  DPM hardware          : %s–%s MHz\n' "${dpm% *}" "${dpm#* }"
   else
     printf '  DPM hardware          : N/A\n'
   fi
-  printf '  Governor range        : %s–%s MHz\n' "$min" "$max"
+
+  if [ -n "$range" ]; then
+    min=${range%%|*}; max=${range#*|}
+    printf '  Governor range        : %s–%s MHz\n' "$min" "$max"
+  else
+    printf '  Governor range        : Unknown\n'
+  fi
   printf '  Safe-points           : %s\n' "${curve:-N/A}"
   printf '  Config                : %s\n' "$GPU_OC_CONFIG"
   echo
-  info 'The governor now uses a frequency/voltage safe-point curve; the displayed range is derived from its lowest and highest points.'
+
+  if [ -n "$range" ] && [ -n "$curve" ]; then
+    info 'The governor uses a frequency/voltage safe-point curve; the displayed range is derived from its lowest and highest points.'
+    [ "$source" = public ] && [ ! -r "$GPU_OC_CONFIG" ] && info 'Status is read from the toolkit public runtime state because the Cyan-Skillfish configuration is root-only.'
+  else
+    warn 'GPU safe-point state is unavailable. Apply a GPU profile once to publish the read-only runtime state.'
+  fi
 }
 
 bc250_gpu_oc_validate_curve() {
@@ -200,6 +228,7 @@ bc250_gpu_oc_apply_curve() {
   systemctl restart "$CYAN_SERVICE" 2>/dev/null || die 'Cyan-Skillfish governor failed to restart.'
   systemctl is-active --quiet "$CYAN_SERVICE" || die 'Cyan-Skillfish governor is not active after profile application.'
   r=$(bc250_gpu_oc_range 2>/dev/null || true)
+  [ -n "$r" ] || r=$(bc250_gpu_oc_range_from_curve "$curve" 2>/dev/null || true)
   ok "GPU OC/UV applied: $name — safe-point curve"
   [ -n "$r" ] && printf '  Governor range        : %s–%s MHz\n' "${r%%|*}" "${r#*|}"
   info 'No benchmark was run. Validate the selected curve with your own workload.'

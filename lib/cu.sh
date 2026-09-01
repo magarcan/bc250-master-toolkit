@@ -41,10 +41,23 @@ bc250_cu_install() {
   else
     ok "UMR detected: $(command -v umr)"
   fi
+
   command -v curl >/dev/null 2>&1 || pacman -S --needed --noconfirm curl
-  curl -fsSL "$CU_MANAGER_URL" -o "$CU_MANAGER"
-  chmod 755 "$CU_MANAGER"
-  echo "[ OK ] CU/WGP manager installed: $CU_MANAGER"
+  curl -fsSL "$CU_MANAGER_URL" -o "$CU_MANAGER" || die 'Could not download the BC-250 CU/WGP manager.'
+  chmod 755 "$CU_MANAGER" || die 'Could not make the BC-250 CU/WGP manager executable.'
+  [ -x "$CU_MANAGER" ] || die 'CU/WGP manager was downloaded but is not executable.'
+  ok "CU/WGP manager installed: $CU_MANAGER"
+
+  echo
+  info 'Launching the BC-250 CU/WGP live manager...'
+  "$CU_MANAGER"
+  local rc=$?
+  if [ "$rc" -eq 0 ]; then
+    ok 'CU/WGP manager exited normally; returning to the Master Toolkit.'
+    return 0
+  fi
+  warn "CU/WGP manager exited with status $rc; returning to the Master Toolkit."
+  return "$rc"
 }
 
 bc250_umr_install_if_missing() {
