@@ -1,0 +1,22 @@
+name: apply deterministic UI cleanup
+"on":
+  push:
+    branches: [ui-cleanup-runner3]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: python3 tools/fix_ui.py
+      - run: bash -n bc250-master-toolkit
+      - run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          rm -f .github/workflows/ui-cleanup-apply.yml tools/fix_ui.py .github/workflows/ui-cleanup-fix.yml
+          git add bc250-master-toolkit .github/workflows/ui-cleanup-apply.yml tools/fix_ui.py .github/workflows/ui-cleanup-fix.yml
+          git commit -m 'refactor: clean up toolkit UI views'
+          git push
