@@ -15,18 +15,15 @@ ui_preflight() {
   ui_banner
   printf 'Preflight / Platform Validation\n\n'
   local card; card=$(bc250_gpu_card 2>/dev/null || true)
-  if [[ "$card" != card* ]]; then
-    warn 'AMD BC-250 GPU was not detected.'
-    return 1
-  fi
-
+  if [[ "$card" != card* ]]; then warn 'AMD BC-250 GPU was not detected.'; return 1; fi
   ok 'AMD BC-250 detected (PCI 1002:13fe).'
   printf '\n  OS              : %s\n  Kernel          : %s\n  BIOS            : %s\n  CPU             : %sC / %sT\n  CPU driver      : %s\n  CPU governor    : %s\n  GPU             : %s\n' "$(. /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-Linux}")" "$(uname -r)" "$(bc250_bios)" "$(bc250_cpu_cores)" "$(bc250_cpu_threads)" "$(bc250_cpu_driver)" "$(bc250_cpu_governor)" "$card"
 
   heading 'Platform'
-  local missing=() threads cores
-  bc250_bios_ok && ok "BIOS $(bc250_bios) detected" || { warn "BIOS $(bc250_bios) — P3.00 recommended"; missing+=("BIOS"); }
-  bc250_kernel_ok && ok 'CachyOS BC-250 kernel detected' || { warn "Kernel $(uname -r) — BC-250 kernel recommended"; missing+=("Kernel"); }
+  local missing=() threads cores bios_ok kernel_ok
+  bios_ok=0; kernel_ok=0
+  if bc250_bios_ok; then bios_ok=1; ok "BIOS $(bc250_bios) detected"; else warn "BIOS $(bc250_bios) — P3.00 recommended"; missing+=("BIOS"); fi
+  if bc250_kernel_ok; then kernel_ok=1; ok 'CachyOS BC-250 kernel detected'; else warn "Kernel $(uname -r) — BC-250 kernel recommended"; missing+=("Kernel"); fi
 
   cores=$(bc250_cpu_cores); threads=$(bc250_cpu_threads)
   if [ "$cores" -ge 8 ] && [ "$threads" -ge 16 ]; then
@@ -39,11 +36,11 @@ ui_preflight() {
     missing+=("CPU topology")
   fi
 
-  if [ -r /sys/firmware/acpi/tables/DSDT ]; then
-    ok 'ACPI: native firmware tables present — no override required'
+  if [ "$bios_ok" -eq 1 ] && [ "$kernel_ok" -eq 1 ]; then
+    ok 'ACPI: native BC-250 support — no ACPI override required'
   else
-    warn 'ACPI: DSDT table not exposed by firmware'
-    missing+=("ACPI firmware tables")
+    warn 'ACPI: native BC-250 support cannot be validated until BIOS and kernel are correct'
+    missing+=("Native BC-250 ACPI support")
   fi
 
   heading 'Software & Telemetry'
