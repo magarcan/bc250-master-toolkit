@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 
+# UI primitives are defined here so the canonical UI is self-contained.
+ok()      { printf '  [ OK ] %s\n' "$*"; }
+warn()    { printf '  [WARN] %s\n' "$*"; }
+info()    { printf '  [INFO] %s\n' "$*"; }
+heading() { printf '\n%s\n──────────────────────────────────────────────────────────────\n' "$*"; }
+die()     { printf '  [ERR ] %s\n' "$*" >&2; return 1; }
+
 ui_pause() { printf '\n'; read -r -p 'Press Enter to continue...' _; }
 ui_banner() {
   printf '\n╔══════════════════════════════════════════════════════════════════╗\n'
@@ -101,9 +108,45 @@ ui_gpu_profiles() {
 }
 ui_performance() { while true; do ui_banner; printf 'Performance Lab\n\n[ 1]  GPU Performance      GPU status, profiles and OC/UV\n[ 2]  CPU Performance      Reserved for validated CPU tuning\n[ 0]  Back\n\nEnter selection: '; read -r s; case "${s,,}" in 1) ui_gpu_profiles;; 2) ui_banner; printf 'CPU Performance\n\n'; info 'CPU tuning remains in the validation/research phase. No settings are changed here yet.'; ui_pause;; 0) return;; esac; done; }
 ui_platform() { while true; do ui_banner; printf 'Platform Setup\n\n[ 1]  BIOS                Check recommended P3.00 firmware\n[ 2]  CachyOS Kernel       Install/activate linux-cachyos-bc250\n[ 3]  GPU Governor         Verify Cyan-Skillfish SMU governor\n[ 4]  CU / WGP             Install/update CU/WGP manager (UMR)\n[ 5]  Preflight            Full validation + assisted setup\n[ 0]  Back\n\nEnter selection: '; read -r s; case "${s,,}" in 1) bc250_bios_setup_menu_action;; 2) bc250_kernel_setup_menu_action;; 3) ui_gpu_status; ui_pause;; 4) bc250_cu_setup_menu_action;; 5) ui_preflight; ui_pause;; 0) return;; esac; done; }
-ui_hardware() { while true; do ui_banner; printf 'Hardware & Telemetry\n\n[ 1]  Live System Snapshot  CPU / GPU / VRM / VRAM telemetry\n[ 2]  Memory / UMA         Current RAM/VRAM split and recommendations\n[ 3]  CU / WGP             Compute-unit state and diagnostics\n[ 4]  CPU Diagnostics      CPU topology, driver and governor\n[ 0]  Back\n\nEnter selection: '; read -r s; case "${s,,}" in 1) ui_status; ui_pause;; 2) ui_banner; printf 'Memory / UMA\n\n'; bc250_memory_status; echo; bc250_memory_recommendations; ui_pause;; 3) ui_require_root cu status; ui_pause;; 4) ui_banner; printf 'CPU Diagnostics\n\n  Cores                  %s\n  Threads                %s\n  Driver                 %s\n  Governor               %s\n  Current frequency      %s MHz\n  CPU temperature        %s°C\n  VRM temperature        %s°C\n' "$(bc250_cpu_cores)" "$(bc250_cpu_threads)" "$(bc250_cpu_driver)" "$(bc250_cpu_governor)" "$(bc250_cpu_freq)" "$(bc250_cpu_temp)" "$(bc250_vrm_temp)"; ui_pause;; 0) return;; esac; done; }
-ui_extras_status() { ui_banner; printf 'System Extras\n\n'; bc250_extras_status; printf '\nBoot options\n'; local conf; conf=$(bc250_boot_conf 2>/dev/null || true); printf '  Boot config            %s\n' "${conf:-not-found}"; if [ -n "$conf" ]; then grep -q 'loglevel=0' "$conf" 2>/dev/null && printf '  RDSEED warning hide    enabled\n' || printf '  RDSEED warning hide    not configured\n'; grep -q 'mitigations=off' "$conf" 2>/dev/null && printf '  CPU mitigations off    enabled\n' || printf '  CPU mitigations off    not configured\n'; fi; }
-ui_extras() { while true; do ui_extras_status; printf '\nActions\n──────────────────────────────────────────────────────────────\n[ 1]  Enable Swap          Configure swap\n[ 2]  ZRAM -> ZSWAP        Enable ZSWAP and disable systemd zram\n[ 3]  Hide RDSEED Warning  Set boot loglevel=0\n[ 4]  Disable Mitigations  Add mitigations=off to boot configuration\n[ 5]  CU / WGP + UMR       Compute-unit tools and diagnostics\n[ R]  Refresh Status\n[ 0]  Back\n\nEnter selection: '; read -r s; case "${s,,}" in 1) ui_require_root extras swap enable 16G; ui_pause;; 2) ui_require_root extras zswap enable; ui_pause;; 3) ui_require_root extras rdseed hide; ui_pause;; 4) ui_require_root extras mitigations off; ui_pause;; 5) ui_require_root cu status; ui_pause;; r) ;; 0) return;; esac; done; }
+ui_hardware() { while true; do ui_banner; printf 'Hardware & Telemetry\n\n[ 1]  Live System Snapshot  CPU / GPU / VRM / VRAM telemetry\n[ 2]  Memory / UMA         Current RAM/VRAM split and recommendations\n[ 3]  CU / WGP             Compute-unit state and diagnostics\n[ 4]  CPU Diagnostics      CPU topology, driver and governor\n[ 0]  Back\n\nEnter selection: '; read -r s; case "${s,,}" in 1) ui_gpu_status; ui_pause;; 2) ui_banner; printf 'Memory / UMA\n\n'; bc250_memory_status; echo; bc250_memory_recommendations; ui_pause;; 3) ui_require_root cu status; ui_pause;; 4) ui_banner; printf 'CPU Diagnostics\n\n  Cores                  %s\n  Threads                %s\n  Driver                 %s\n  Governor               %s\n  Current frequency      %s MHz\n  CPU temperature        %s°C\n  VRM temperature        %s°C\n' "$(bc250_cpu_cores)" "$(bc250_cpu_threads)" "$(bc250_cpu_driver)" "$(bc250_cpu_governor)" "$(bc250_cpu_freq)" "$(bc250_cpu_temp)" "$(bc250_vrm_temp)"; ui_pause;; 0) return;; esac; done; }
+ui_extras_status() {
+  ui_banner
+  printf 'System Extras\n\n'
+  heading 'Current state'
+  bc250_extras_status
+  local conf
+  conf=$(bc250_boot_conf 2>/dev/null || true)
+  printf '\n  Boot configuration     %s\n' "${conf:-not found}"
+  if [ -n "$conf" ]; then
+    grep -q 'loglevel=0' "$conf" 2>/dev/null && ok 'RDSEED warning hidden' || info 'RDSEED warning: default'
+    grep -q 'mitigations=off' "$conf" 2>/dev/null && warn 'CPU mitigations disabled' || info 'CPU mitigations: default'
+  fi
+}
+ui_extras() {
+  while true; do
+    ui_extras_status
+    printf '\n'
+    heading 'Available actions'
+    printf '[ 1]  Enable Swap          Configure swap\n'
+    printf '[ 2]  ZRAM -> ZSWAP        Enable ZSWAP and disable systemd zram\n'
+    printf '[ 3]  Hide RDSEED Warning  Set boot loglevel=0\n'
+    printf '[ 4]  Disable Mitigations  Add mitigations=off to boot configuration\n'
+    printf '[ 5]  CU / WGP + UMR       Compute-unit tools and diagnostics\n'
+    printf '[ R]  Refresh               Re-check current state\n'
+    printf '[ 0]  Back\n\n'
+    printf 'Enter selection: '
+    read -r s
+    case "${s,,}" in
+      1) ui_require_root extras swap enable 16G; ui_pause;;
+      2) ui_require_root extras zswap enable; ui_pause;;
+      3) ui_require_root extras rdseed hide; ui_pause;;
+      4) ui_require_root extras mitigations off; ui_pause;;
+      5) ui_require_root cu status; ui_pause;;
+      r) ;;
+      0) return;;
+    esac
+  done
+}
 ui_recovery() { while true; do ui_banner; printf 'Recovery & Revert\n\n[ 1]  Reset GPU OC/UV      Restore saved GPU configuration\n[ 2]  Restore boot config  Restore toolkit backup when available\n[ 3]  Show system status   Diagnose before reverting\n[ 0]  Back\n\nEnter selection: '; read -r s; case "${s,,}" in 1) ui_require_root gpu oc reset; ui_pause;; 2) ui_require_root bash -c 'if [ -f /etc/default/limine.orig ]; then cp -a /etc/default/limine.orig /etc/default/limine; command -v limine-update >/dev/null 2>&1 && limine-update || true; echo "Boot configuration restored."; else echo "No boot backup found."; fi'; ui_pause;; 3) ui_status; ui_pause;; 0) return;; esac; done; }
 ui_menu() { while true; do ui_banner; printf 'Validation\n──────────────────────────────────────────────────────────────\n[ P]  Preflight             Validate and help configure missing components\n\nPlatform\n──────────────────────────────────────────────────────────────\n[ 1]  Platform Setup        BIOS / kernel / governor / CU-WGP\n[ 2]  Performance Lab       GPU status, profiles and CPU tuning\n[ 3]  Hardware & Telemetry  Live measurements and diagnostics\n[ 4]  System Extras         Status + optional system changes\n[ 5]  Recovery & Revert     Undo supported changes\n\nSystem\n──────────────────────────────────────────────────────────────\n[ S]  Status                Current system snapshot\n[ U]  Update Toolkit        Update from GitHub checkout\n[ 0]  Exit\n\nEnter selection: '; read -r s; case "${s,,}" in p) ui_preflight; ui_pause;; s) ui_status; ui_pause;; 1) ui_platform;; 2) ui_performance;; 3) ui_hardware;; 4) ui_extras;; 5) ui_recovery;; u) info 'Use git pull in the toolkit checkout to update safely.'; ui_pause;; 0) return;; esac; done; }
 
