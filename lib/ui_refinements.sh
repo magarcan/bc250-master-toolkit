@@ -1,5 +1,26 @@
 #!/usr/bin/env bash
 
+# UI status colors. ui_refinements.sh is sourced after ui.sh, so these are
+# the canonical status renderers for the interactive toolkit.
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  UI_RESET=$'\033[0m'
+  UI_GREEN=$'\033[1;32m'
+  UI_YELLOW=$'\033[1;33m'
+  UI_RED=$'\033[1;31m'
+  UI_CYAN=$'\033[1;36m'
+else
+  UI_RESET=''
+  UI_GREEN=''
+  UI_YELLOW=''
+  UI_RED=''
+  UI_CYAN=''
+fi
+
+ok()   { printf '  %s[ OK ]%s %s\n' "$UI_GREEN" "$UI_RESET" "$*"; }
+warn() { printf '  %s[WARN]%s %s\n' "$UI_YELLOW" "$UI_RESET" "$*"; }
+info() { printf '  %s[INFO]%s %s\n' "$UI_CYAN" "$UI_RESET" "$*"; }
+die()  { printf '  %s[ERR ]%s %s\n' "$UI_RED" "$UI_RESET" "$*" >&2; return 1; }
+
 ui_cpu_load_percent() {
   local line1 line2 t1 i1 t2 i2 delta_total delta_idle
   line1=$(awk '/^cpu / {print $2+$3+$4+$5+$6+$7+$8,$5; exit}' /proc/stat)
@@ -93,25 +114,26 @@ ui_extras_status() {
   zram=$([ -e /dev/zram0 ] && echo present || echo not-exposed)
   conf=$(bc250_boot_conf 2>/dev/null || true)
   swapfile=$(swapon --show=NAME,TYPE,SIZE --noheadings 2>/dev/null | awk '$2 == "file" {print; exit}')
-  printf '  Swapfile              '; if [ -n "$swapfile" ]; then ok 'Enabled'; printf '                        %s\n' "$swapfile"; else warn 'Not configured'; fi
-  printf '  ZRAM                  '; if [ "$zram" = present ]; then ok 'Active'; else info 'Not exposed'; fi
-  printf '  ZSWAP                 '; if [ "$zswap" = Y ]; then ok 'Enabled'; else warn 'Disabled'; fi
-  printf '  Boot configuration    %s\n' "${conf:-not found}"
+  printf '  Swapfile             '; if [ -n "$swapfile" ]; then ok 'Enabled'; else warn 'Not configured'; fi
+  printf '  ZRAM                 '; if [ "$zram" = present ]; then ok 'Active'; else info 'Not exposed'; fi
+  printf '  ZSWAP                '; if [ "$zswap" = Y ]; then ok 'Enabled'; else warn 'Disabled'; fi
+  printf '  Boot configuration   %s\n' "${conf:-not found}"
   rdseed=default; mitigations=default
   if [ -n "$conf" ]; then grep -q 'loglevel=0' "$conf" 2>/dev/null && rdseed=hidden; grep -q 'mitigations=off' "$conf" 2>/dev/null && mitigations=disabled; fi
-  printf '  RDSEED warning        '; [ "$rdseed" = hidden ] && ok 'Hidden' || info 'Default'
-  printf '  CPU mitigations       '; [ "$mitigations" = disabled ] && warn 'Disabled' || info 'Default'
+  printf '  RDSEED warning       '; [ "$rdseed" = hidden ] && ok 'Hidden' || info 'Default'
+  printf '  CPU mitigations      '; [ "$mitigations" = disabled ] && warn 'Disabled' || info 'Default'
 }
 
 ui_extras() {
   while true; do
     ui_extras_status; printf '\n'; heading 'Available actions'
-    printf '\n[ 1]  Enable Swap\n      Configure a persistent swapfile (default 16G)\n'
-    printf '\n[ 2]  Enable ZSWAP\n      Disable systemd ZRAM and enable compressed swap\n'
-    printf '\n[ 3]  Hide RDSEED warning\n      Add loglevel=0 to boot configuration\n'
-    printf '\n[ 4]  Disable CPU mitigations\n      Add mitigations=off to boot configuration\n'
-    printf '\n[ 5]  CU / WGP + UMR\n      Open compute-unit tools and status\n'
-    printf '\n[ R]  Refresh status\n[ 0]  Back\n\nEnter selection: '
+    printf '[ 1] Enable Swap          — Persistent swapfile (16G default)\n'
+    printf '[ 2] Enable ZSWAP         — Disable systemd ZRAM and enable compressed swap\n'
+    printf '[ 3] Hide RDSEED Warning  — Set boot loglevel=0\n'
+    printf '[ 4] Disable Mitigations  — Add mitigations=off to boot configuration\n'
+    printf '[ 5] CU / WGP + UMR       — Compute-unit tools and diagnostics\n'
+    printf '[ R] Refresh               — Re-check current state\n'
+    printf '[ 0] Back\n\nEnter selection: '
     read -r s
     case "${s,,}" in
       1) ui_require_root extras swap enable 16G; ui_pause;;
