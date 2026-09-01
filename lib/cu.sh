@@ -35,6 +35,12 @@ bc250_umr_install() {
 }
 
 bc250_cu_install() {
+  if ! bc250_umr_present; then
+    warn 'UMR is required before installing the BC-250 CU/WGP manager.'
+    bc250_umr_install || return 1
+  else
+    ok "UMR detected: $(command -v umr)"
+  fi
   command -v curl >/dev/null 2>&1 || pacman -S --needed --noconfirm curl
   curl -fsSL "$CU_MANAGER_URL" -o "$CU_MANAGER"
   chmod 755 "$CU_MANAGER"
