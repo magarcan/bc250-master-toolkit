@@ -32,16 +32,7 @@ show_preflight(){
   local card; card=$(bc250_gpu_card 2>/dev/null || true)
   [ -n "$card" ] || { warn 'AMD BC-250 GPU was not detected.'; return 1; }
   ok 'AMD BC-250 detected (PCI 1002:13fe).'
-  printf '
-  OS              : %s
-  Kernel          : %s
-  BIOS            : %s
-  CPU             : %sC / %sT
-  CPU driver      : %s
-  CPU governor    : %s
-  GPU             : %s
-
-' \
+  printf '\n  OS              : %s\n  Kernel          : %s\n  BIOS            : %s\n  CPU             : %sC / %sT\n  CPU driver      : %s\n  CPU governor    : %s\n  GPU             : %s\n\n' \
     "$(. /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-Linux}")" "$(uname -r)" "$(bc250_bios)" \
     "$(bc250_cpu_cores)" "$(bc250_cpu_threads)" "$(bc250_cpu_driver)" "$(bc250_cpu_governor)" "$card"
   bc250_bios_ok && ok 'BIOS P3.00 detected — recommended telemetry firmware.' || warn "BIOS $(bc250_bios) — P3.00 recommended."
@@ -55,30 +46,17 @@ show_preflight(){
   [ -r "/sys/class/drm/$card/device/pp_dpm_sclk" ] && ok 'GPU DPM interface available' || warn 'GPU DPM interface unavailable'
   [ -r "/sys/class/drm/$card/device/mem_info_vram_total" ] && ok 'VRAM telemetry available' || warn 'VRAM telemetry unavailable'
   [ -x /usr/local/bin/bc250-cu-live-manager ] && ok 'CU/WGP manager installed' || warn 'CU/WGP manager missing'
-  [ -x /usr/local/bin/umr ] || command -v umr >/dev/null 2>&1 && ok 'UMR available' || warn 'UMR missing'
+  [ -x /usr/bin/umr ] || command -v umr >/dev/null 2>&1 && ok 'UMR available' || warn 'UMR missing'
 }
 
 toolkit_status(){
   banner; heading 'System Status'; echo
-  printf '  BIOS                   %s
-  Kernel                 %s
-  CPU                    %sC / %sT
-  CPU driver             %s
-  CPU governor           %s
-' \
+  printf '  BIOS                   %s\n  Kernel                 %s\n  CPU                    %sC / %sT\n  CPU driver             %s\n  CPU governor           %s\n' \
     "$(bc250_bios)" "$(uname -r)" "$(bc250_cpu_cores)" "$(bc250_cpu_threads)" "$(bc250_cpu_driver)" "$(bc250_cpu_governor)"
   local card h vr; card=$(bc250_gpu_card 2>/dev/null || true)
   if [[ "$card" == card* ]]; then
     h=$(bc250_hwmon "$card" 2>/dev/null || true); vr=$(bc250_gpu_vram "$card")
-    printf '  GPU                    %s
-  GPU SCLK               %s MHz
-  GPU busy               %s%%
-  GPU temp               %s°C
-  VRAM                   %s/%s MB
-  CPU temp               %s°C
-  VRM temp               %s°C
-
-' \
+    printf '  GPU                    %s\n  GPU SCLK               %s MHz\n  GPU busy               %s%%\n  GPU temp               %s°C\n  VRAM                   %s/%s MB\n  CPU temp               %s°C\n  VRM temp               %s°C\n\n' \
       "$card" "$(bc250_gpu_sclk "$h")" "$(bc250_gpu_busy "$card")" "$(bc250_gpu_temp "$h")" "${vr% *}" "${vr#* }" "$(bc250_cpu_temp)" "$(bc250_vrm_temp)"
   fi
   bc250_bios_ok && ok 'BIOS: P3.00 recommended firmware' || warn "BIOS: $(bc250_bios) — P3.00 recommended"
@@ -89,19 +67,11 @@ toolkit_status(){
 
 gpu_status(){
   banner; heading 'GPU Telemetry'; echo
-  systemctl is-active --quiet cyan-skillfish-governor-smu.service && printf 'Service                : active
-' || printf 'Service                : inactive
-'
+  systemctl is-active --quiet cyan-skillfish-governor-smu.service && printf 'Service                : active\n' || printf 'Service                : inactive\n'
   local card h vr; card=$(bc250_gpu_card 2>/dev/null || true)
   if [[ "$card" == card* ]]; then
     h=$(bc250_hwmon "$card" 2>/dev/null || true); vr=$(bc250_gpu_vram "$card")
-    printf 'GPU                    : %s
-GPU SCLK               : %s MHz
-GPU busy               : %s%%
-GPU temp               : %s°C
-VRAM                   : %s/%s MB
-VRAM MCLK              : %s MHz
-' \
+    printf 'GPU                    : %s\nGPU SCLK               : %s MHz\nGPU busy               : %s%%\nGPU temp               : %s°C\nVRAM                   : %s/%s MB\nVRAM MCLK              : %s MHz\n' \
       "$card" "$(bc250_gpu_sclk "$h")" "$(bc250_gpu_busy "$card")" "$(bc250_gpu_temp "$h")" "${vr% *}" "${vr#* }" "$(bc250_gpu_mclk "$h")"
   else
     warn 'BC-250 GPU not detected.'
@@ -119,13 +89,7 @@ platform_gpu_governor_status(){
 platform_menu(){
   while true; do
     banner; heading 'Platform Setup'; echo
-    printf '[ 1]  BIOS                Check recommended P3.00 firmware
-[ 2]  CachyOS Kernel       Install/activate linux-cachyos-bc250
-[ 3]  GPU Governor         Verify Cyan-Skillfish SMU governor
-[ 4]  CU / WGP             Install/update CU/WGP manager
-[ 0]  Back
-
-Enter selection: '
+    printf '[ 1]  BIOS                Check recommended P3.00 firmware\n[ 2]  CachyOS Kernel       Install/activate linux-cachyos-bc250\n[ 3]  GPU Governor         Verify Cyan-Skillfish SMU governor\n[ 4]  CU / WGP             Install/update CU/WGP manager\n[ 0]  Back\n\nEnter selection: '
     read -r s
     case "${s,,}" in
       1) bc250_bios_setup_menu_action; pause_screen;;
@@ -140,15 +104,8 @@ Enter selection: '
 hardware_menu(){
   while true; do
     banner; heading 'Hardware & Telemetry'; echo
-    printf 'Live hardware measurements and focused diagnostics.
-
-'
-    printf '[ 1]  GPU Telemetry       Current GPU / temperature / VRAM snapshot
-[ 2]  Memory / UMA         RAM/VRAM split and recommendations
-[ 3]  CU / WGP             Compute-unit state and diagnostics
-[ 0]  Back
-
-Enter selection: '
+    printf 'Live hardware measurements and focused diagnostics.\n\n'
+    printf '[ 1]  GPU Telemetry       Current GPU / temperature / VRAM snapshot\n[ 2]  Memory / UMA         RAM/VRAM split and recommendations\n[ 3]  CU / WGP             Compute-unit state and diagnostics\n[ 0]  Back\n\nEnter selection: '
     read -r s
     case "${s,,}" in
       1) gpu_status; pause_screen;;
@@ -157,34 +114,6 @@ Enter selection: '
       0) return;;
     esac
   done
-}{
-  banner; heading 'System Status'; echo
-  printf '  BIOS                   %s\n  Kernel                 %s\n  CPU                    %sC / %sT\n  CPU driver             %s\n  CPU governor           %s\n' \
-    "$(bc250_bios)" "$(uname -r)" "$(bc250_cpu_cores)" "$(bc250_cpu_threads)" "$(bc250_cpu_driver)" "$(bc250_cpu_governor)"
-  local card h vr; card=$(bc250_gpu_card 2>/dev/null || true)
-  if [[ "$card" == card* ]]; then
-    h=$(bc250_hwmon "$card" 2>/dev/null || true); vr=$(bc250_gpu_vram "$card")
-    printf '  GPU                    %s\n  GPU SCLK               %s MHz\n  GPU busy               %s%%\n  GPU temp               %s°C\n  VRAM                   %s/%s MB\n  CPU temp               %s°C\n  VRM temp               %s°C\n\n' \
-      "$card" "$(bc250_gpu_sclk "$h")" "$(bc250_gpu_busy "$card")" "$(bc250_gpu_temp "$h")" "${vr% *}" "${vr#* }" "$(bc250_cpu_temp)" "$(bc250_vrm_temp)"
-  fi
-  bc250_bios_ok && ok 'BIOS: P3.00 recommended firmware' || warn "BIOS: $(bc250_bios) — P3.00 recommended"
-  bc250_kernel_ok && ok 'Kernel: BC-250 CachyOS kernel active' || warn "Kernel: $(uname -r) — BC-250 kernel not active"
-  bc250_governor_ok && ok 'GPU governor: Cyan-Skillfish SMU ACTIVE' || warn 'GPU governor: inactive'
-  [ -x /usr/local/bin/bc250-cu-live-manager ] && ok 'CU/WGP manager: installed' || warn 'CU/WGP manager: missing'
-}
-
-gpu_status(){
-  banner; heading 'GPU Control Status'; echo
-  systemctl is-active --quiet cyan-skillfish-governor-smu.service && printf 'Service                : active\n' || printf 'Service                : inactive\n'
-  local card h vr; card=$(bc250_gpu_card 2>/dev/null || true)
-  if [[ "$card" == card* ]]; then
-    h=$(bc250_hwmon "$card" 2>/dev/null || true); vr=$(bc250_gpu_vram "$card")
-    printf 'GPU                    : %s\nGPU SCLK               : %s MHz\nGPU busy               : %s%%\nGPU temp               : %s°C\nVRAM                   : %s/%s MB\nVRAM MCLK              : %s MHz\n\n' \
-      "$card" "$(bc250_gpu_sclk "$h")" "$(bc250_gpu_busy "$card")" "$(bc250_gpu_temp "$h")" "${vr% *}" "${vr#* }" "$(bc250_gpu_mclk "$h")"
-  else
-    warn 'BC-250 GPU not detected.'
-  fi
-  bc250_gpu_oc_status
 }
 
 memory_report(){
