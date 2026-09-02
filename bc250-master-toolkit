@@ -11,8 +11,33 @@ done
 
 if [ "${1:-}" = "--gui" ]; then
   shift
+
+  # YAD enables Pango markup in dialog text by default. Some versions reject
+  # the legacy/unsupported explicit --markup flag. Strip it transparently so
+  # the GUI layer stays compatible across YAD releases without touching the
+  # backend or duplicating any hardware logic.
+  if command -v yad >/dev/null 2>&1 && ! yad --help-all 2>&1 | grep -q -- '--markup'; then
+    yad() {
+      local arg
+      local -a filtered=()
+      for arg in "$@"; do
+        [ "$arg" = "--markup" ] || filtered+=("$arg")
+      done
+      command yad "${filtered[@]}"
+    }
+  fi
+
+  if ! declare -F bc250_gui_main >/dev/null 2>&1; then
+    printf '%s\n' 'GUI startup error: bc250_gui_main is not available.' >&2
+    exit 1
+  fi
+
   bc250_gui_main "$@"
-  exit $?
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf 'GUI exited with status %s. Run with BC250_GUI_DEBUG=1 for diagnostics.\n' "$rc" >&2
+  fi
+  exit "$rc"
 fi
 
 if [ "${1:-}" = "__root" ]; then
