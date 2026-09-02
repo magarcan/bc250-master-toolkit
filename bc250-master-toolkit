@@ -7,6 +7,13 @@ for f in "$ROOT"/lib/hardware.sh "$ROOT"/lib/memory.sh "$ROOT"/lib/extras.sh "$R
 done
 [ -r "$ROOT/lib/ui_refinements.sh" ] && source "$ROOT/lib/ui_refinements.sh"
 [ -r "$ROOT/lib/ui_main.sh" ] && source "$ROOT/lib/ui_main.sh"
+[ -r "$ROOT/lib/ui_gui.sh" ] && source "$ROOT/lib/ui_gui.sh"
+
+if [ "${1:-}" = "--gui" ]; then
+  shift
+  bc250_gui_main "$@"
+  exit $?
+fi
 
 if [ "${1:-}" = "__root" ]; then
   [ "$EUID" -eq 0 ] || { die 'Internal root dispatcher called without root privileges.'; exit 1; }
