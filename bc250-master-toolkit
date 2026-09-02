@@ -8,6 +8,7 @@ done
 [ -r "$ROOT/lib/ui_refinements.sh" ] && source "$ROOT/lib/ui_refinements.sh"
 [ -r "$ROOT/lib/ui_main.sh" ] && source "$ROOT/lib/ui_main.sh"
 [ -r "$ROOT/lib/ui_gui.sh" ] && source "$ROOT/lib/ui_gui.sh"
+[ -r "$ROOT/lib/ui_gui_refinements.sh" ] && source "$ROOT/lib/ui_gui_refinements.sh"
 
 if [ "${1:-}" = "--gui" ]; then
   shift
