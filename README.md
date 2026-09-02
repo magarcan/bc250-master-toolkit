@@ -294,12 +294,28 @@ In particular:
 
 - **redbeard1083/bc250-toolkit** — an important CachyOS-oriented unified BC-250 toolkit and reference for setup, status, governors, swap/ZSWAP and other platform operations.
   - https://github.com/redbeard1083/bc250-toolkit
+- **movacx/bc250-control-center** — a broader graphical BC-250 control center that combines monitoring, GPU SMU control, CPU tuning, CU controls and fan management. Its dashboard/module organization is a useful reference for future UI evolution, particularly its compact real-time monitoring, explicit hardware state, diagnostics/history and separation of advanced controls.
+  - https://github.com/movacx/bc250-control-center
 - **keyboardspecialist/bc250-steamos** — broader BC-250 SteamOS tooling and a useful reference for unified management of ACPI, power, memory, CU, audio and other platform components.
   - https://github.com/keyboardspecialist/bc250-steamos
 - **rpf16rj/bc250-steamos-real-toolkit** — another community toolkit/reference with a broad collection of BC-250 integrations.
   - https://github.com/rpf16rj/bc250-steamos-real-toolkit
 
-The goal here is not to duplicate every feature of those projects. It is to provide a focused CachyOS BC-250 master toolkit with a clear separation between validation, platform setup, performance, diagnostics and recovery.
+### UI ideas worth studying from BC250 Control Center
+
+The `movacx/bc250-control-center` project is particularly interesting as a UI/UX reference, not as a dependency of this toolkit. Its current README describes several ideas that may be useful when the terminal interface evolves:
+
+- a **single dashboard-oriented view** for the most important live hardware state
+- grouping CPU temperature, GPU temperature, GPU power, GPU clock, SMU voltage and fan RPM into a compact status band
+- showing **current/live CU state separately from the saved next-boot CU profile**
+- explicit distinction between **monitoring and controls**, rather than mixing every operation into one screen
+- system-health checks, diagnostics and metric history
+- clear warnings around potentially dangerous hardware changes
+- optional controller/gamepad navigation for SteamOS-style use
+- interface scaling and localization
+- fan control presented as a dedicated module rather than hidden among unrelated platform settings
+
+We should use these as design references while preserving the Master Toolkit's validation-first philosophy and its deliberate separation of platform setup, GPU/CPU performance, diagnostics and recovery.
 
 ## External references
 
@@ -316,6 +332,7 @@ The goal here is not to duplicate every feature of those projects. It is to prov
 | EFI core unlock | https://github.com/Hexxeh/bc250-efi-core-unlock | EFI core-unlock reference |
 | ACPI fix | https://github.com/mendesrr/bc250-acpi-fix-updated-8c | Historical BC-250 ACPI reference |
 | CachyOS BC-250 toolkit reference | https://github.com/redbeard1083/bc250-toolkit | Community toolkit reference |
+| BC-250 Control Center | https://github.com/movacx/bc250-control-center | UI/UX and broader monitoring/control reference |
 | SteamOS BC-250 toolkit reference | https://github.com/keyboardspecialist/bc250-steamos | Broader BC-250 toolkit reference |
 | Real BC-250 toolkit reference | https://github.com/rpf16rj/bc250-steamos-real-toolkit | Broader community integration reference |
 
