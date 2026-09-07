@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -uo pipefail
-VERSION="1.13.1"
+VERSION="1.13.2"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 for f in "$ROOT"/lib/hardware.sh "$ROOT"/lib/memory.sh "$ROOT"/lib/extras.sh "$ROOT"/lib/cu.sh "$ROOT"/lib/gpu_oc.sh "$ROOT"/lib/setup.sh "$ROOT"/lib/ui.sh; do
   [ -r "$f" ] && source "$f"
 done
 [ -r "$ROOT/lib/ui_refinements.sh" ] && source "$ROOT/lib/ui_refinements.sh"
 [ -r "$ROOT/lib/ui_main.sh" ] && source "$ROOT/lib/ui_main.sh"
+[ -r "$ROOT/lib/gpu_governor.sh" ] && source "$ROOT/lib/gpu_governor.sh"
 [ -r "$ROOT/lib/ui_gui.sh" ] && source "$ROOT/lib/ui_gui.sh"
 [ -r "$ROOT/lib/ui_gui_refinements.sh" ] && source "$ROOT/lib/ui_gui_refinements.sh"
 
@@ -46,6 +47,7 @@ if [ "${1:-}" = "__root" ]; then
   shift
   case "${1:-}" in
     kernel-install) bc250_kernel_install;;
+    gpu-governor-ensure) bc250_gpu_governor_ensure_kernel_backend;;
     umr-install) bc250_umr_install;;
     cu-install) bc250_cu_install;;
     *) die "Unknown internal setup action: ${1:-}"; exit 1;;
