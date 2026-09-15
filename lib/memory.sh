@@ -2,15 +2,23 @@
 
 bc250_memory_status() {
   local total avail card path vram_used vram_total gtt_total
+  local total_gib avail_gib vram_gib
+
   total=$(awk '/MemTotal:/{printf "%d",$2/1024}' /proc/meminfo)
   avail=$(awk '/MemAvailable:/{printf "%d",$2/1024}' /proc/meminfo)
   card=$(bc250_gpu_card 2>/dev/null || true)
   vram_total='N/A'
   vram_used='N/A'
 
+  # Keep decimal formatting inside awk and pass the resulting value to printf
+  # as a string. Bash printf interprets numeric arguments according to the
+  # current locale, so values such as 14.8 can fail on locales using commas.
+  total_gib=$(awk -v m="$total" 'BEGIN {printf "%.1f",m/1024}')
+  avail_gib=$(awk -v m="$avail" 'BEGIN {printf "%.1f",m/1024}')
+
   printf 'Memory / UMA\n\n'
-  printf '  System RAM (kernel-visible)  %s MiB (%.1f GiB)\n' "$total" "$(awk -v m="$total" 'BEGIN {printf "%.1f",m/1024}')"
-  printf '  RAM currently available      %s MiB (%.1f GiB)\n' "$avail" "$(awk -v m="$avail" 'BEGIN {printf "%.1f",m/1024}')"
+  printf '  System RAM (kernel-visible)  %s MiB (%s GiB)\n' "$total" "$total_gib"
+  printf '  RAM currently available      %s MiB (%s GiB)\n' "$avail" "$avail_gib"
 
   if [ -n "$card" ]; then
     path=$(bc250_card_path "$card" 2>/dev/null || true)
@@ -20,8 +28,12 @@ bc250_memory_status() {
     if [ -r "$path/device/mem_info_vram_used" ]; then
       vram_used=$(awk '{printf "%d",$1/1048576}' "$path/device/mem_info_vram_used")
     fi
+
     printf '  UMA / VRAM reservation       %s MiB' "$vram_total"
-    [ "$vram_total" != 'N/A' ] && printf ' (%.1f GiB)' "$(awk -v m="$vram_total" 'BEGIN {printf "%.1f",m/1024}')"
+    if [ "$vram_total" != 'N/A' ]; then
+      vram_gib=$(awk -v m="$vram_total" 'BEGIN {printf "%.1f",m/1024}')
+      printf ' (%s GiB)' "$vram_gib"
+    fi
     printf '\n'
     printf '  UMA / VRAM currently used    %s MiB\n' "$vram_used"
 
