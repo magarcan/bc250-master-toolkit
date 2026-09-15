@@ -8,26 +8,43 @@
 bc250_gpu_governor_kernel_backend_ok() {
   local cfg="${GPU_OC_CONFIG:-/etc/cyan-skillfish-governor-smu/config.toml}"
   [ -r "$cfg" ] || return 1
-  python3 - "$cfg" <<'PY'
-import sys, tomllib
-try:
-    data = tomllib.load(open(sys.argv[1], 'rb'))
-except Exception:
-    raise SystemExit(1)
-usage = data.get('gpu-usage')
-gpu = data.get('gpu')
-if not isinstance(usage, dict) or not isinstance(gpu, dict):
-    raise SystemExit(1)
-expected = {
-    'fix-metrics': False,
-    'fix-freq': False,
-    'method': 'kernel',
-}
-if any(usage.get(key) != value for key, value in expected.items()):
-    raise SystemExit(1)
-if gpu.get('set-method') != 'kernel':
-    raise SystemExit(1)
-PY
+
+  # Keep this health check dependency-free. The configuration is root-owned,
+  # so it is intentionally used only from privileged setup/verification paths.
+  local fix_metrics fix_freq method set_method
+  fix_metrics=$(awk '
+    /^\[gpu-usage\]$/ { in_section=1; next }
+    /^\[/ { in_section=0 }
+    in_section && /^[[:space:]]*fix-metrics[[:space:]]*=/ {
+      sub(/^[^=]*=[[:space:]]*/, ""); print; exit
+    }
+  ' "$cfg" 2>/dev/null)
+  fix_freq=$(awk '
+    /^\[gpu-usage\]$/ { in_section=1; next }
+    /^\[/ { in_section=0 }
+    in_section && /^[[:space:]]*fix-freq[[:space:]]*=/ {
+      sub(/^[^=]*=[[:space:]]*/, ""); print; exit
+    }
+  ' "$cfg" 2>/dev/null)
+  method=$(awk '
+    /^\[gpu-usage\]$/ { in_section=1; next }
+    /^\[/ { in_section=0 }
+    in_section && /^[[:space:]]*method[[:space:]]*=/ {
+      sub(/^[^=]*=[[:space:]]*/, ""); print; exit
+    }
+  ' "$cfg" 2>/dev/null)
+  set_method=$(awk '
+    /^\[gpu\]$/ { in_section=1; next }
+    /^\[/ { in_section=0 }
+    in_section && /^[[:space:]]*set-method[[:space:]]*=/ {
+      sub(/^[^=]*=[[:space:]]*/, ""); print; exit
+    }
+  ' "$cfg" 2>/dev/null)
+
+  [ "$fix_metrics" = 'false' ] || return 1
+  [ "$fix_freq" = 'false' ] || return 1
+  [ "$method" = '"kernel"' ] || return 1
+  [ "$set_method" = '"kernel"' ] || return 1
 }
 
 bc250_gpu_governor_backend_status() {
@@ -73,34 +90,39 @@ bc250_gpu_governor_ensure_kernel_backend() {
     return 1
   }
 
-  python3 - "$cfg" "$tmp" <<'PY'
-import sys, re
-src, dst = sys.argv[1:]
-s = open(src, encoding='utf-8').read()
+  awk '
+    BEGIN { skip=0 }
+    /^\[gpu-usage\]$/ {
+      print "[gpu-usage]"
+      print "fix-metrics = false"
+      print "fix-freq = false"
+      print "method = \"kernel\""
+      print ""
+      skip=1
+      next
+    }
+    /^\[gpu\]$/ {
+      print "[gpu]"
+      print "set-method = \"kernel\""
+      print ""
+      skip=1
+      next
+    }
+    /^\[/ {
+      skip=0
+    }
+    skip { next }
+    { print }
+  ' "$cfg" > "$tmp"
 
-def replace_table(text, name, body):
-    pattern = rf'(?ms)^\[{re.escape(name)}\]\s*.*?(?=^\[|\Z)'
-    block = f'[{name}]\n{body}\n\n'
-    if re.search(pattern, text):
-        return re.sub(pattern, block, text, count=1)
-    return text.rstrip() + '\n\n' + block
-
-s = replace_table(
-    s,
-    'gpu-usage',
-    'fix-metrics = false\nfix-freq = false\nmethod = "kernel"',
-)
-s = replace_table(s, 'gpu', 'set-method = "kernel"')
-open(dst, 'w', encoding='utf-8').write(s)
-PY
-
-  if ! python3 - "$tmp" <<'PY'
-import sys, tomllib
-tomllib.load(open(sys.argv[1], 'rb'))
-PY
-  then
+  if ! grep -q '^\[gpu-usage\]$' "$tmp" || \
+     ! grep -q '^fix-metrics = false$' "$tmp" || \
+     ! grep -q '^fix-freq = false$' "$tmp" || \
+     ! grep -q '^method = "kernel"$' "$tmp" || \
+     ! grep -q '^\[gpu\]$' "$tmp" || \
+     ! grep -q '^set-method = "kernel"$' "$tmp"; then
     rm -f "$tmp"
-    die 'Generated governor configuration is invalid TOML.'
+    die 'Generated governor configuration failed backend validation.'
     return 1
   fi
 
@@ -150,13 +172,10 @@ if declare -F bc250_gpu_oc_reset >/dev/null 2>&1; then
   }
 fi
 
-# Preflight's governor health check now includes the required backend.
-if declare -F bc250_governor_ok >/dev/null 2>&1; then
-  eval "$(declare -f bc250_governor_ok | sed '1s/^bc250_governor_ok /bc250_governor_ok_original /')"
-  bc250_governor_ok() {
-    bc250_governor_ok_original "$@" && bc250_gpu_governor_kernel_backend_ok
-  }
-fi
+# Do not wrap the unprivileged governor service health check here. The
+# Cyan-Skillfish configuration is root-owned; backend validation belongs to
+# privileged setup/verification paths, while Preflight must be able to check
+# service health directly as the invoking user.
 
 # Entering Platform Setup reconciles an existing governor configuration with
 # the supported kernel backend. It never flashes BIOS or changes the kernel.
