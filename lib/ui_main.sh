@@ -38,13 +38,12 @@ ui_menu() {
   while true; do
     ui_banner
     printf 'Validation\n──────────────────────────────────────────────────────────────\n'
-    printf '[ P]  Preflight             Validate and help configure missing components\n\n'
+    printf '[ P]  Preflight             Validate and configure missing components\n\n'
     printf 'Platform\n──────────────────────────────────────────────────────────────\n'
-    printf '[ 1]  Platform Setup        BIOS / kernel / governor / CU-WGP\n'
-    printf '[ 2]  Performance Lab       GPU status, profiles and CPU tuning\n'
-    printf '[ 3]  Hardware & Telemetry  Live measurements and diagnostics\n'
-    printf '[ 4]  System Extras         Status + optional system changes\n'
-    printf '[ 5]  Recovery & Revert     Undo supported changes\n\n'
+    printf '[ 1]  Performance Lab       GPU status, profiles and CPU tuning\n'
+    printf '[ 2]  Hardware & Telemetry  Live measurements and diagnostics\n'
+    printf '[ 3]  System Extras         Status + optional system changes\n'
+    printf '[ 4]  Recovery & Revert     Undo supported changes\n\n'
     printf 'System\n──────────────────────────────────────────────────────────────\n'
     printf '[ S]  Status                Current system summary\n'
     printf '[ U]  Update Toolkit        Update from GitHub checkout\n'
@@ -53,11 +52,10 @@ ui_menu() {
     case "${s,,}" in
       p) ui_preflight; ui_pause;;
       s) ui_status; ui_pause;;
-      1) ui_platform;;
-      2) ui_performance;;
-      3) ui_hardware;;
-      4) ui_extras;;
-      5) ui_recovery;;
+      1) ui_performance;;
+      2) ui_hardware;;
+      3) ui_extras;;
+      4) ui_recovery;;
       u) info 'Use git pull in the toolkit checkout to update safely.'; ui_pause;;
       0) return;;
     esac

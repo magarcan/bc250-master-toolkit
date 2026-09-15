@@ -13,7 +13,7 @@ done
 
 # If Preflight finds only the GPU governor service/backend missing, Y means
 # "repair it now" rather than merely opening a menu and waiting for another
-# selection. Other missing components keep the existing assisted menu.
+# selection. Other missing components keep the assisted component menu.
 if declare -F ui_preflight_install_menu >/dev/null 2>&1; then
   eval "$(declare -f ui_preflight_install_menu | sed '1s/^ui_preflight_install_menu /ui_preflight_install_menu_original /')"
   ui_preflight_install_menu() {
@@ -25,7 +25,6 @@ if declare -F ui_preflight_install_menu >/dev/null 2>&1; then
     [ -x /usr/bin/cyan-skillfish-governor-smu ] || missing+=("Cyan-Skillfish governor")
     [ -f /etc/cyan-skillfish-governor-smu/config.toml ] || missing+=("Cyan-Skillfish configuration")
     bc250_governor_ok || missing+=("Cyan-Skillfish service")
-    bc250_telemetry_ok || missing+=("GPU telemetry")
     local card; card=$(bc250_gpu_card 2>/dev/null || true)
     [ -r "/sys/class/drm/$card/device/pp_dpm_sclk" ] || missing+=("GPU DPM")
     [ -r "/sys/class/drm/$card/device/mem_info_vram_total" ] || missing+=("VRAM telemetry")
@@ -112,9 +111,16 @@ if [ "${1:-}" = "__root" ]; then
     cu)
       case "${2:-}" in
         install) bc250_cu_install;;
+        launch) [ -x "$CU_MANAGER" ] && "$CU_MANAGER" || { die 'BC-250 CU/WGP manager is not installed.'; exit 1; };;
         umr) [ "${3:-}" = install ] && bc250_umr_install || { die "Unknown privileged UMR action: ${3:-}"; exit 1; };;
         status) bc250_cu_status;;
         *) die "Unknown privileged CU action: ${2:-}"; exit 1;;
+      esac
+      ;;
+    package)
+      case "${2:-}" in
+        install) pacman -S --needed --noconfirm "${3:-}";;
+        *) die "Unknown privileged package action: ${2:-}"; exit 1;;
       esac
       ;;
     umr-install) bc250_umr_install;;

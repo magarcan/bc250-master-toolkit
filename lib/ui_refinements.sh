@@ -54,6 +54,99 @@ ui_live_snapshot() {
   printf '  Temperature            %s°C\n' "$(bc250_vrm_temp)"
 }
 
+# Preflight's setup flow is deliberately component-oriented: select one
+# missing item, perform only that action, then return to validation.
+ui_preflight_install_menu() {
+  while true; do
+    local missing=() card choice
+    card=$(bc250_gpu_card 2>/dev/null || true)
+    bc250_bios_ok || missing+=("BIOS P3.00")
+    bc250_kernel_ok || missing+=("CachyOS BC-250 kernel")
+    command -v cpupower >/dev/null 2>&1 || missing+=("cpupower")
+    command -v vulkaninfo >/dev/null 2>&1 || missing+=("vulkaninfo")
+    [ -x /usr/bin/cyan-skillfish-governor-smu ] || missing+=("Cyan-Skillfish governor")
+    [ -f /etc/cyan-skillfish-governor-smu/config.toml ] || missing+=("Cyan-Skillfish configuration")
+    bc250_governor_ok || missing+=("Cyan-Skillfish service")
+    [ -r "/sys/class/drm/$card/device/pp_dpm_sclk" ] || missing+=("GPU DPM")
+    [ -r "/sys/class/drm/$card/device/mem_info_vram_total" ] || missing+=("VRAM telemetry")
+    [ -x /usr/local/bin/bc250-cu-live-manager ] || missing+=("CU/WGP manager")
+    bc250_umr_present || missing+=("UMR")
+
+    ui_banner
+    printf 'Preflight / Component Setup\n\n'
+    if [ "${#missing[@]}" -eq 0 ]; then
+      ok 'All actionable components are installed.'
+      return 0
+    fi
+
+    heading 'Missing components'
+    local i=1 item
+    for item in "${missing[@]}"; do
+      printf '[ %d]  %s\n' "$i" "$item"
+      i=$((i + 1))
+    done
+    printf '[ R]  Re-run Preflight\n'
+    printf '[ 0]  Back\n\nSelect one component to configure: '
+    read -r choice
+
+    case "${choice,,}" in
+      r) ui_preflight; return $?;;
+      0) return;;
+    esac
+
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "${#missing[@]}" ]; then
+      warn 'Invalid selection.'
+      ui_pause
+      continue
+    fi
+
+    item="${missing[$((choice - 1))]}"
+    case "$item" in
+      'BIOS P3.00')
+        bc250_bios_setup_menu_action
+        ;;
+      'CachyOS BC-250 kernel')
+        bc250_kernel_setup_menu_action
+        ;;
+      cpupower)
+        if command -v pacman >/dev/null 2>&1; then
+          ui_require_root package install cpupower
+        else
+          warn 'pacman is required to install cpupower automatically.'
+        fi
+        ui_pause
+        ;;
+      vulkaninfo)
+        if command -v pacman >/dev/null 2>&1; then
+          ui_require_root package install vulkan-tools
+        else
+          warn 'pacman is required to install vulkan-tools automatically.'
+        fi
+        ui_pause
+        ;;
+      'Cyan-Skillfish governor'|'Cyan-Skillfish configuration'|'Cyan-Skillfish service')
+        ui_require_root gpu governor ensure
+        ui_pause
+        ;;
+      'CU/WGP manager')
+        bc250_cu_setup_menu_action
+        ;;
+      UMR)
+        bc250_umr_setup_menu_action
+        ;;
+      'GPU DPM'|'VRAM telemetry')
+        warn 'This interface is provided by the active BC-250 kernel/driver; there is no separate toolkit installer.'
+        info 'Re-run Preflight after confirming the BC-250 kernel and GPU driver are active.'
+        ui_pause
+        ;;
+      *)
+        warn "No installer is defined for: $item"
+        ui_pause
+        ;;
+    esac
+  done
+}
+
 ui_preflight() {
   ui_banner
   printf 'Preflight / Platform Validation\n\n'
@@ -75,7 +168,7 @@ ui_preflight() {
   command -v vulkaninfo >/dev/null 2>&1 && ok 'vulkaninfo available' || { warn 'vulkaninfo missing'; missing+=("vulkaninfo"); }
   [ -x /usr/bin/cyan-skillfish-governor-smu ] && ok 'Cyan-Skillfish binary installed' || { warn 'Cyan-Skillfish binary missing'; missing+=("Cyan-Skillfish governor"); }
   [ -f /etc/cyan-skillfish-governor-smu/config.toml ] && ok 'Cyan-Skillfish configuration present' || { warn 'Cyan-Skillfish configuration missing'; missing+=("Cyan-Skillfish configuration"); }
-  bc250_governor_ok && ok 'GPU governor service active' || { warn 'GPU governor service inactive'; missing+=("GPU governor service"); }
+  bc250_governor_ok && ok 'GPU governor service active' || { warn 'GPU governor service inactive'; missing+=("Cyan-Skillfish service"); }
   bc250_telemetry_ok && ok 'GPU telemetry interfaces available' || { warn 'GPU telemetry interfaces incomplete'; missing+=("GPU telemetry"); }
   [ -r "/sys/class/drm/$card/device/pp_dpm_sclk" ] && ok 'GPU DPM interface available' || { warn 'GPU DPM interface unavailable'; missing+=("GPU DPM"); }
   [ -r "/sys/class/drm/$card/device/mem_info_vram_total" ] && ok 'VRAM telemetry available' || { warn 'VRAM telemetry unavailable'; missing+=("VRAM telemetry"); }
@@ -116,7 +209,6 @@ ui_extras() {
     printf '[ 2] Enable ZSWAP         — Disable systemd ZRAM and enable compressed swap\n'
     printf '[ 3] Hide RDSEED Warning  — Set boot loglevel=0\n'
     printf '[ 4] Disable Mitigations  — Add mitigations=off to boot configuration\n'
-    printf '[ 5] CU / WGP + UMR       — Compute-unit tools and diagnostics\n'
     printf '[ R] Refresh               — Re-check current state\n'
     printf '[ 0] Back\n\nEnter selection: '
     read -r s
@@ -125,15 +217,12 @@ ui_extras() {
       2) ui_require_root extras zswap enable; ui_pause;;
       3) ui_require_root extras rdseed hide; ui_pause;;
       4) ui_require_root extras mitigations off; ui_pause;;
-      5) ui_require_root cu status; ui_pause;;
       r) ;; 0) return;;
     esac
   done
 }
 
 # Keep the privileged dispatcher safe under the launcher's `set -u` policy.
-# Calls such as `ui_require_root cu status` legitimately provide only two
-# arguments; `${1:-}`/`${2:-}`/`${3:-}` must therefore be used here.
 ui_require_root() {
   local a="${1:-}" b="${2:-}" c="${3:-}"
   if [ "$EUID" -eq 0 ]; then
@@ -147,8 +236,10 @@ ui_require_root() {
       extras\ rdseed\ hide*) bc250_rdseed_hide;;
       extras\ mitigations\ off*) bc250_set_cmdline_flag mitigations=off && bc250_update_boot;;
       cu\ install*) bc250_cu_install;;
+      cu\ launch*) "$CU_MANAGER";;
       cu\ umr\ install*) bc250_umr_install;;
       cu\ status*) bc250_cu_status;;
+      package\ install*) pacman -S --needed --noconfirm "${4:-}";;
       *) die "Unsupported privileged action: $*"; return 1;;
     esac
     return $?
@@ -157,4 +248,32 @@ ui_require_root() {
   command -v sudo >/dev/null 2>&1 || { die 'sudo is required for this operation.'; return 1; }
   sudo -v || { die 'Authorization was cancelled.'; return 1; }
   sudo "$ROOT/bc250-master-toolkit" __root "$@"
+}
+
+# In Hardware & Telemetry, CU/WGP is an application launcher, not a status page.
+ui_hardware() {
+  while true; do
+    ui_banner
+    printf 'Hardware & Telemetry\n\n'
+    printf '[ 1]  Live System Snapshot  CPU / GPU / VRM / VRAM telemetry\n'
+    printf '[ 2]  Memory / UMA          Current RAM/VRAM split and recommendations\n'
+    printf '[ 3]  CU / WGP              Launch BC-250 CU/WGP live manager\n'
+    printf '[ 4]  CPU Diagnostics       CPU topology, driver and governor\n'
+    printf '[ 0]  Back\n\nEnter selection: '
+    read -r s
+    case "${s,,}" in
+      1) ui_live_snapshot; ui_pause;;
+      2) bc250_memory_status; ui_pause;;
+      3)
+        if [ -x "$CU_MANAGER" ]; then
+          ui_require_root cu launch
+          ui_pause
+        else
+          bc250_cu_setup_menu_action
+        fi
+        ;;
+      4) bc250_cpu_status; ui_pause;;
+      0) return;;
+    esac
+  done
 }
