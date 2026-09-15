@@ -5,6 +5,8 @@ bc250_memory_status() {
   total=$(awk '/MemTotal:/{printf "%d",$2/1024}' /proc/meminfo)
   avail=$(awk '/MemAvailable:/{printf "%d",$2/1024}' /proc/meminfo)
   card=$(bc250_gpu_card 2>/dev/null || true)
+  vram_total='N/A'
+  vram_used='N/A'
 
   printf 'Memory / UMA\n\n'
   printf '  System RAM (kernel-visible)  %s MiB (%.1f GiB)\n' "$total" "$(awk -v m="$total" 'BEGIN {printf "%.1f",m/1024}')"
@@ -14,13 +16,9 @@ bc250_memory_status() {
     path=$(bc250_card_path "$card" 2>/dev/null || true)
     if [ -r "$path/device/mem_info_vram_total" ]; then
       vram_total=$(awk '{printf "%d",$1/1048576}' "$path/device/mem_info_vram_total")
-    else
-      vram_total='N/A'
     fi
     if [ -r "$path/device/mem_info_vram_used" ]; then
       vram_used=$(awk '{printf "%d",$1/1048576}' "$path/device/mem_info_vram_used")
-    else
-      vram_used='N/A'
     fi
     printf '  UMA / VRAM reservation       %s MiB' "$vram_total"
     [ "$vram_total" != 'N/A' ] && printf ' (%.1f GiB)' "$(awk -v m="$vram_total" 'BEGIN {printf "%.1f",m/1024}')"
