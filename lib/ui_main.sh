@@ -61,7 +61,7 @@ ui_hardware() {
   done
 }
 
-# Performance Lab keeps GPU and CPU tuning symmetrical: each has a status
+# Performance Lab keeps GPU and CPU paths symmetrical: each has a status
 # entry first, followed by its validated tuning/profile actions.
 ui_cpu_performance() {
   while true; do
@@ -75,6 +75,22 @@ ui_cpu_performance() {
     case "${s,,}" in
       1) bc250_cpu_status; ui_pause;;
       2) ui_banner; printf 'CPU Tuning\n\n'; info 'CPU tuning remains in the validation/research phase. No settings are changed here yet.'; ui_pause;;
+      0) return;;
+    esac
+  done
+}
+
+ui_performance() {
+  while true; do
+    ui_banner
+    printf 'Performance Lab\n\n'
+    printf '[ 1]  GPU Performance      GPU status, profiles and OC/UV\n'
+    printf '[ 2]  CPU Performance      CPU status and tuning\n'
+    printf '[ 0]  Back\n\nEnter selection: '
+    read -r s
+    case "${s,,}" in
+      1) ui_gpu_profiles;;
+      2) ui_cpu_performance;;
       0) return;;
     esac
   done
