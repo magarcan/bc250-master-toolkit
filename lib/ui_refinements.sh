@@ -154,14 +154,7 @@ ui_require_root() {
     return $?
   fi
 
-  if [ "$a $b $c" = 'gpu governor ensure' ]; then
-    command -v sudo >/dev/null 2>&1 || { die 'sudo is required for this operation.'; return 1; }
-    sudo -v || { die 'Authorization was cancelled.'; return 1; }
-    sudo "$ROOT/bc250-master-toolkit" __root gpu-governor-ensure
-    return $?
-  fi
-
   command -v sudo >/dev/null 2>&1 || { die 'sudo is required for this operation.'; return 1; }
   sudo -v || { die 'Authorization was cancelled.'; return 1; }
-  sudo env BC250_PRIVILEGED=1 "$ROOT/bc250-master-toolkit" "$@"
+  sudo "$ROOT/bc250-master-toolkit" __root "$@"
 }
