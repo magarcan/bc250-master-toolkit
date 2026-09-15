@@ -13,11 +13,6 @@ done
 
 if [ "${1:-}" = "--gui" ]; then
   shift
-
-  # YAD enables Pango markup in dialog text by default. Some versions reject
-  # the legacy/unsupported explicit --markup flag. Strip it transparently so
-  # the GUI layer stays compatible across YAD releases without touching the
-  # backend or duplicating any hardware logic.
   if command -v yad >/dev/null 2>&1 && ! yad --help-all 2>&1 | grep -q -- '--markup'; then
     yad() {
       local arg
@@ -28,12 +23,10 @@ if [ "${1:-}" = "--gui" ]; then
       command yad "${filtered[@]}"
     }
   fi
-
   if ! declare -F bc250_gui_main >/dev/null 2>&1; then
     printf '%s\n' 'GUI startup error: bc250_gui_main is not available.' >&2
     exit 1
   fi
-
   bc250_gui_main "$@"
   rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -42,12 +35,48 @@ if [ "${1:-}" = "--gui" ]; then
   exit "$rc"
 fi
 
+# All privileged UI actions enter through this dispatcher.  Keeping the
+# complete action tuple here avoids falling through into the normal UI parser
+# (which would report e.g. "Unknown command: cu").
 if [ "${1:-}" = "__root" ]; then
   [ "$EUID" -eq 0 ] || { die 'Internal root dispatcher called without root privileges.'; exit 1; }
   shift
   case "${1:-}" in
     kernel-install) bc250_kernel_install;;
     gpu-governor-ensure) bc250_gpu_governor_ensure_kernel_backend;;
+    gpu)
+      case "${2:-}" in
+        oc)
+          case "${3:-}" in
+            apply) bc250_gpu_oc_apply "${4:-}";;
+            manual) bc250_gpu_oc_manual "${4:-}" "${5:-}" "${6:-}";;
+            reset) bc250_gpu_oc_reset;;
+            *) die "Unknown privileged GPU OC action: ${3:-}"; exit 1;;
+          esac
+          ;;
+        governor)
+          [ "${3:-}" = ensure ] && bc250_gpu_governor_ensure_kernel_backend || { die "Unknown privileged GPU governor action: ${3:-}"; exit 1; }
+          ;;
+        *) die "Unknown privileged GPU action: ${2:-}"; exit 1;;
+      esac
+      ;;
+    extras)
+      case "${2:-}" in
+        swap) [ "${3:-}" = enable ] && bc250_swap_enable "${4:-16G}" || { die "Unknown privileged swap action: ${3:-}"; exit 1; };;
+        zswap) [ "${3:-}" = enable ] && bc250_zswap_enable || { die "Unknown privileged zswap action: ${3:-}"; exit 1; };;
+        rdseed) [ "${3:-}" = hide ] && bc250_rdseed_hide || { die "Unknown privileged RDSEED action: ${3:-}"; exit 1; };;
+        mitigations) [ "${3:-}" = off ] && bc250_set_cmdline_flag mitigations=off && bc250_update_boot || { die "Unknown privileged mitigations action: ${3:-}"; exit 1; };;
+        *) die "Unknown privileged extras action: ${2:-}"; exit 1;;
+      esac
+      ;;
+    cu)
+      case "${2:-}" in
+        install) bc250_cu_install;;
+        umr) [ "${3:-}" = install ] && bc250_umr_install || { die "Unknown privileged UMR action: ${3:-}"; exit 1; };;
+        status) bc250_cu_status;;
+        *) die "Unknown privileged CU action: ${2:-}"; exit 1;;
+      esac
+      ;;
     umr-install) bc250_umr_install;;
     cu-install) bc250_cu_install;;
     *) die "Unknown internal setup action: ${1:-}"; exit 1;;
