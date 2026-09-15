@@ -137,6 +137,69 @@ bc250_cpu_freq() {
   [ -r "$f" ] && awk '{printf "%d",$1/1000}' "$f" || echo N/A
 }
 
+# CPU Diagnostics backend used by Hardware & Telemetry.
+# Keep this function dependency-light: all values come from existing
+# hardware helpers and standard cpufreq sysfs interfaces.
+bc250_cpu_status() {
+  local policy=/sys/devices/system/cpu/cpufreq/policy0
+  local cores threads driver governor freq temp min max boost governors
+
+  printf 'CPU Diagnostics\n\n'
+
+  cores=$(bc250_cpu_cores)
+  threads=$(bc250_cpu_threads)
+  driver=$(bc250_cpu_driver)
+  governor=$(bc250_cpu_governor)
+  freq=$(bc250_cpu_freq)
+  temp=$(bc250_cpu_temp)
+
+  printf '  Topology              %sC / %sT\n' "$cores" "$threads"
+  printf '  Scaling driver        %s\n' "$driver"
+  printf '  Governor              %s\n' "$governor"
+  printf '  Current frequency     %s MHz\n' "$freq"
+  printf '  Temperature           %s°C\n' "$temp"
+
+  if [ -r "$policy/cpuinfo_min_freq" ]; then
+    min=$(awk '{printf "%d",$1/1000}' "$policy/cpuinfo_min_freq")
+    printf '  Hardware min          %s MHz\n' "$min"
+  else
+    printf '  Hardware min          N/A\n'
+  fi
+
+  if [ -r "$policy/cpuinfo_max_freq" ]; then
+    max=$(awk '{printf "%d",$1/1000}' "$policy/cpuinfo_max_freq")
+    printf '  Hardware max          %s MHz\n' "$max"
+  else
+    printf '  Hardware max          N/A\n'
+  fi
+
+  if [ -r "$policy/boost" ]; then
+    boost=$(cat "$policy/boost" 2>/dev/null || true)
+    case "$boost" in
+      1) printf '  CPU boost              enabled\n' ;;
+      0) printf '  CPU boost              disabled\n' ;;
+      *) printf '  CPU boost              %s\n' "${boost:-N/A}" ;;
+    esac
+  else
+    printf '  CPU boost              N/A\n'
+  fi
+
+  if [ -r "$policy/scaling_available_governors" ]; then
+    governors=$(cat "$policy/scaling_available_governors" 2>/dev/null || true)
+    printf '  Available governors    %s\n' "${governors:-N/A}"
+  else
+    printf '  Available governors    N/A\n'
+  fi
+
+  printf '\nInterpretation\n'
+  if [ "$cores" -ge 8 ] && [ "$threads" -ge 16 ]; then
+    printf '  CPU topology is consistent with an unlocked 8C / 16T BC-250.\n'
+  else
+    printf '  CPU topology is below the expected 8C / 16T BC-250 configuration.\n'
+    printf '  Check the BIOS CPU Core Unlock setting before applying CPU tuning.\n'
+  fi
+}
+
 bc250_bios() {
   [ -r /sys/class/dmi/id/bios_version ] && cat /sys/class/dmi/id/bios_version || echo N/A
 }
