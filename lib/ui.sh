@@ -56,9 +56,9 @@ ui_preflight_install_menu() {
   local item
   for item in "${missing[@]}"; do warn "$item"; done
   printf '\n[ 1]  BIOS Setup           Review/open P3.00 firmware project\n'
-  printf '[ 2]  Kernel Setup         Install linux-cachyos-bc250 if needed\n'
+  printf '[ 2]  Kernel Setup         Install/activate linux-cachyos-bc250 if needed\n'
   printf '[ 3]  CU / WGP Setup       Install UMR + CU/WGP manager\n'
-  printf '[ 4]  GPU Governor Status  Review governor state\n'
+  printf '[ 4]  GPU Governor Setup   Ensure kernel backend + service\n'
   printf '[ 5]  Re-run Preflight     Check again after changes\n'
   printf '[ 0]  Back\n\nEnter selection: '
   read -r choice
@@ -66,7 +66,7 @@ ui_preflight_install_menu() {
     1) bc250_bios_setup_menu_action;;
     2) bc250_kernel_setup_menu_action;;
     3) bc250_cu_setup_menu_action;;
-    4) ui_gpu_status; ui_pause;;
+    4) ui_require_root gpu governor ensure; ui_pause;;
     5) ui_preflight;;
     0) return;;
   esac
@@ -169,6 +169,7 @@ ui_require_root() {
       gpu\ oc\ apply) bc250_gpu_oc_apply "${4:-}";;
       gpu\ oc\ manual) bc250_gpu_oc_manual "${4:-}" "${5:-}" "${6:-}";;
       gpu\ oc\ reset) bc250_gpu_oc_reset;;
+      gpu\ governor\ ensure) bc250_gpu_governor_ensure_kernel_backend;;
       extras\ swap\ enable) bc250_swap_enable "${4:-16G}";;
       extras\ zswap\ enable) bc250_zswap_enable;;
       extras\ rdseed\ hide) bc250_rdseed_hide;;
@@ -180,6 +181,15 @@ ui_require_root() {
     esac
     return $?
   fi
+
+  # The governor setup has a dedicated privileged dispatcher in the launcher.
+  if [ "$1 $2 $3" = 'gpu governor ensure' ]; then
+    command -v sudo >/dev/null 2>&1 || { die 'sudo is required for this operation.'; return 1; }
+    sudo -v || { die 'Authorization was cancelled.'; return 1; }
+    sudo "$ROOT/bc250-master-toolkit" __root gpu-governor-ensure
+    return $?
+  fi
+
   command -v sudo >/dev/null 2>&1 || { die 'sudo is required for this operation.'; return 1; }
   sudo -v || { die 'Authorization was cancelled.'; return 1; }
   sudo env BC250_PRIVILEGED=1 "$ROOT/bc250-master-toolkit" "$@"
