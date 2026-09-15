@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
-VERSION="1.13.2"
+VERSION="1.13.3"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 for f in "$ROOT"/lib/hardware.sh "$ROOT"/lib/memory.sh "$ROOT"/lib/extras.sh "$ROOT"/lib/cu.sh "$ROOT"/lib/gpu_oc.sh "$ROOT"/lib/setup.sh "$ROOT"/lib/ui.sh; do
   [ -r "$f" ] && source "$f"
@@ -10,6 +10,47 @@ done
 [ -r "$ROOT/lib/gpu_governor.sh" ] && source "$ROOT/lib/gpu_governor.sh"
 [ -r "$ROOT/lib/ui_gui.sh" ] && source "$ROOT/lib/ui_gui.sh"
 [ -r "$ROOT/lib/ui_gui_refinements.sh" ] && source "$ROOT/lib/ui_gui_refinements.sh"
+
+# If Preflight finds only the GPU governor service/backend missing, Y means
+# "repair it now" rather than merely opening a menu and waiting for another
+# selection. Other missing components keep the existing assisted menu.
+if declare -F ui_preflight_install_menu >/dev/null 2>&1; then
+  eval "$(declare -f ui_preflight_install_menu | sed '1s/^ui_preflight_install_menu /ui_preflight_install_menu_original /')"
+  ui_preflight_install_menu() {
+    local missing=()
+    bc250_bios_ok || missing+=("BIOS P3.00")
+    bc250_kernel_ok || missing+=("CachyOS BC-250 kernel")
+    command -v cpupower >/dev/null 2>&1 || missing+=("cpupower")
+    command -v vulkaninfo >/dev/null 2>&1 || missing+=("vulkaninfo")
+    [ -x /usr/bin/cyan-skillfish-governor-smu ] || missing+=("Cyan-Skillfish governor")
+    [ -f /etc/cyan-skillfish-governor-smu/config.toml ] || missing+=("Cyan-Skillfish configuration")
+    bc250_governor_ok || missing+=("Cyan-Skillfish service")
+    bc250_telemetry_ok || missing+=("GPU telemetry")
+    local card; card=$(bc250_gpu_card 2>/dev/null || true)
+    [ -r "/sys/class/drm/$card/device/pp_dpm_sclk" ] || missing+=("GPU DPM")
+    [ -r "/sys/class/drm/$card/device/mem_info_vram_total" ] || missing+=("VRAM telemetry")
+    [ -x /usr/local/bin/bc250-cu-live-manager ] || missing+=("CU/WGP manager")
+    bc250_umr_present || missing+=("UMR")
+
+    if [ "${#missing[@]}" -eq 1 ] && [ "${missing[0]}" = "Cyan-Skillfish service" ]; then
+      heading 'Automatic repair'
+      info 'GPU governor service is the only missing component.'
+      ui_require_root gpu governor ensure
+      local rc=$?
+      if [ "$rc" -eq 0 ]; then
+        ok 'GPU governor repair completed.'
+        ui_pause
+        ui_preflight
+      else
+        die 'GPU governor repair failed.'
+        ui_pause
+      fi
+      return "$rc"
+    fi
+
+    ui_preflight_install_menu_original
+  }
+fi
 
 if [ "${1:-}" = "--gui" ]; then
   shift
@@ -35,9 +76,8 @@ if [ "${1:-}" = "--gui" ]; then
   exit "$rc"
 fi
 
-# All privileged UI actions enter through this dispatcher.  Keeping the
-# complete action tuple here avoids falling through into the normal UI parser
-# (which would report e.g. "Unknown command: cu").
+# All privileged UI actions enter through this dispatcher. Keeping the
+# complete action tuple here prevents fall-through into the normal UI parser.
 if [ "${1:-}" = "__root" ]; then
   [ "$EUID" -eq 0 ] || { die 'Internal root dispatcher called without root privileges.'; exit 1; }
   shift
