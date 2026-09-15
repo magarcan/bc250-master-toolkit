@@ -130,3 +130,38 @@ ui_extras() {
     esac
   done
 }
+
+# Keep the privileged dispatcher safe under the launcher's `set -u` policy.
+# Calls such as `ui_require_root cu status` legitimately provide only two
+# arguments; `${1:-}`/`${2:-}`/`${3:-}` must therefore be used here.
+ui_require_root() {
+  local a="${1:-}" b="${2:-}" c="${3:-}"
+  if [ "$EUID" -eq 0 ]; then
+    case "$a $b $c" in
+      gpu\ oc\ apply*) bc250_gpu_oc_apply "${4:-}";;
+      gpu\ oc\ manual*) bc250_gpu_oc_manual "${4:-}" "${5:-}" "${6:-}";;
+      gpu\ oc\ reset*) bc250_gpu_oc_reset;;
+      gpu\ governor\ ensure*) bc250_gpu_governor_ensure_kernel_backend;;
+      extras\ swap\ enable*) bc250_swap_enable "${4:-16G}";;
+      extras\ zswap\ enable*) bc250_zswap_enable;;
+      extras\ rdseed\ hide*) bc250_rdseed_hide;;
+      extras\ mitigations\ off*) bc250_set_cmdline_flag mitigations=off && bc250_update_boot;;
+      cu\ install*) bc250_cu_install;;
+      cu\ umr\ install*) bc250_umr_install;;
+      cu\ status*) bc250_cu_status;;
+      *) die "Unsupported privileged action: $*"; return 1;;
+    esac
+    return $?
+  fi
+
+  if [ "$a $b $c" = 'gpu governor ensure' ]; then
+    command -v sudo >/dev/null 2>&1 || { die 'sudo is required for this operation.'; return 1; }
+    sudo -v || { die 'Authorization was cancelled.'; return 1; }
+    sudo "$ROOT/bc250-master-toolkit" __root gpu-governor-ensure
+    return $?
+  fi
+
+  command -v sudo >/dev/null 2>&1 || { die 'sudo is required for this operation.'; return 1; }
+  sudo -v || { die 'Authorization was cancelled.'; return 1; }
+  sudo env BC250_PRIVILEGED=1 "$ROOT/bc250-master-toolkit" "$@"
+}
