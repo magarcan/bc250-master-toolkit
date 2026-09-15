@@ -34,6 +34,52 @@ ui_recovery() {
   done
 }
 
+# Keep Hardware & Telemetry focused on live hardware data and diagnostics.
+# CPU tuning/status belongs in Performance Lab alongside the GPU path.
+ui_hardware() {
+  while true; do
+    ui_banner
+    printf 'Hardware & Telemetry\n\n'
+    printf '[ 1]  Live System Snapshot  CPU / GPU / VRM / VRAM telemetry\n'
+    printf '[ 2]  Memory / UMA          Current RAM/VRAM split and recommendations\n'
+    printf '[ 3]  CU / WGP              Launch BC-250 CU/WGP live manager\n'
+    printf '[ 0]  Back\n\nEnter selection: '
+    read -r s
+    case "${s,,}" in
+      1) ui_live_snapshot; ui_pause;;
+      2) bc250_memory_status; ui_pause;;
+      3)
+        if [ -x "$CU_MANAGER" ]; then
+          ui_require_root cu launch
+          ui_pause
+        else
+          bc250_cu_setup_menu_action
+        fi
+        ;;
+      0) return;;
+    esac
+  done
+}
+
+# Performance Lab keeps GPU and CPU tuning symmetrical: each has a status
+# entry first, followed by its validated tuning/profile actions.
+ui_cpu_performance() {
+  while true; do
+    ui_banner
+    printf 'Performance Lab — CPU\n\n'
+    printf 'CPU\n──────────────────────────────────────────────────────────────\n'
+    printf '[ 1]  CPU Status            Topology + frequency + driver + governor\n'
+    printf '[ 2]  CPU Tuning            Reserved for validated CPU tuning\n'
+    printf '[ 0]  Back\n\nEnter selection: '
+    read -r s
+    case "${s,,}" in
+      1) bc250_cpu_status; ui_pause;;
+      2) ui_banner; printf 'CPU Tuning\n\n'; info 'CPU tuning remains in the validation/research phase. No settings are changed here yet.'; ui_pause;;
+      0) return;;
+    esac
+  done
+}
+
 ui_menu() {
   while true; do
     ui_banner
