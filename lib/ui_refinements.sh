@@ -69,7 +69,7 @@ ui_preflight_install_menu() {
     bc250_governor_ok || missing+=("Cyan-Skillfish service")
     [ -r "/sys/class/drm/$card/device/pp_dpm_sclk" ] || missing+=("GPU DPM")
     [ -r "/sys/class/drm/$card/device/mem_info_vram_total" ] || missing+=("VRAM telemetry")
-    [ -x /usr/local/bin/bc250-cu-live-manager ] || missing+=("CU/WGP manager")
+    [ -x "$CU_MANAGER" ] || missing+=("CU/WGP manager")
     bc250_umr_present || missing+=("UMR")
 
     ui_banner
@@ -174,7 +174,7 @@ ui_preflight() {
   [ -r "/sys/class/drm/$card/device/mem_info_vram_total" ] && ok 'VRAM telemetry available' || { warn 'VRAM telemetry unavailable'; missing+=("VRAM telemetry"); }
 
   heading 'CU / WGP'
-  [ -x /usr/local/bin/bc250-cu-live-manager ] && ok 'cu-live manager available' || { warn 'cu-live manager missing'; missing+=("CU/WGP manager"); }
+  [ -x "$CU_MANAGER" ] && ok 'cu-live manager available' || { warn 'cu-live manager missing'; missing+=("CU/WGP manager"); }
   bc250_umr_present && ok 'UMR available' || { warn 'UMR missing'; missing+=("UMR"); }
 
   if [ "${#missing[@]}" -eq 0 ]; then
