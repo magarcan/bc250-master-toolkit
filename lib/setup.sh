@@ -80,7 +80,7 @@ bc250_umr_setup_menu_action() {
   read -r -p 'Press Enter to continue...' _
 }
 bc250_cu_setup_menu_action() {
-  banner; heading 'CU / WGP Setup'; echo
+  ui_banner; heading 'CU / WGP Setup'; echo
   if ! bc250_umr_present; then
     warn 'UMR is not installed; CU/WGP manager depends on UMR for register access.'
     echo
