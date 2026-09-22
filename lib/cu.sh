@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 
 CU_MANAGER_URL=https://raw.githubusercontent.com/WinnieLV/bc250-cu-live-manager/refs/heads/main/bc250-cu-live-manager.sh
-CU_MANAGER=/usr/local/bin/bc250-cu-live-manager
+# Keep the managed source outside the upstream service target. The live manager's
+# install-service command copies itself to /usr/local/bin, so invoking it from
+# the same path would make that copy operation fail.
+CU_MANAGER=/usr/share/bin/bc250-cu-live-manager
 UMR_SRC=https://gitlab.freedesktop.org/tomstdenis/umr.git
 
 bc250_umr_present() { command -v umr >/dev/null 2>&1; }
@@ -43,21 +46,19 @@ bc250_cu_install() {
   fi
 
   command -v curl >/dev/null 2>&1 || pacman -S --needed --noconfirm curl
-  curl -fsSL "$CU_MANAGER_URL" -o "$CU_MANAGER" || die 'Could not download the BC-250 CU/WGP manager.'
-  chmod 755 "$CU_MANAGER" || die 'Could not make the BC-250 CU/WGP manager executable.'
-  [ -x "$CU_MANAGER" ] || die 'CU/WGP manager was downloaded but is not executable.'
-  ok "CU/WGP manager installed: $CU_MANAGER"
+  if [ -x "$CU_MANAGER" ]; then
+    ok "CU/WGP manager already installed: $CU_MANAGER"
+  else
+    mkdir -p "$(dirname "$CU_MANAGER")" || die 'Could not create the CU/WGP manager directory.'
+    curl -fsSL "$CU_MANAGER_URL" -o "$CU_MANAGER" || die 'Could not download the BC-250 CU/WGP manager.'
+    chmod 755 "$CU_MANAGER" || die 'Could not make the BC-250 CU/WGP manager executable.'
+    [ -x "$CU_MANAGER" ] || die 'CU/WGP manager was downloaded but is not executable.'
+    ok "CU/WGP manager installed: $CU_MANAGER"
+  fi
 
   echo
-  info 'Launching the BC-250 CU/WGP live manager...'
-  "$CU_MANAGER"
-  local rc=$?
-  if [ "$rc" -eq 0 ]; then
-    ok 'CU/WGP manager exited normally; returning to the Master Toolkit.'
-    return 0
-  fi
-  warn "CU/WGP manager exited with status $rc; returning to the Master Toolkit."
-  return "$rc"
+  info 'CU/WGP manager is ready. Launch it from Hardware & Telemetry when needed.'
+  return 0
 }
 
 bc250_umr_install_if_missing() {
